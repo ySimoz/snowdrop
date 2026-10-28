@@ -17,7 +17,41 @@
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
+    <true/>
+    <key>NSSupportsAutomaticTermination</key>
     <false/>
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.snowdrop.mac</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>snowdrop</string>
+            </array>
+        </dict>
+    </array>
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>Send with Snowdrop</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>handleSendService</string>
+            <key>NSPortName</key>
+            <string>Snowdrop</string>
+            <key>NSSendFileTypes</key>
+            <array>
+                <string>public.item</string>
+                <string>public.data</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>

@@ -67,6 +67,9 @@ object SnowdropCoreBridge : AndroidCallback {
     private val _status = MutableStateFlow<EngineStatus>(EngineStatus.Disconnected)
     val status: StateFlow<EngineStatus> = _status.asStateFlow()
 
+    private val _deviceName = MutableStateFlow<String>("")
+    val deviceName: StateFlow<String> = _deviceName.asStateFlow()
+
     private val _peers = MutableStateFlow<List<PeerItem>>(emptyList())
     val peers: StateFlow<List<PeerItem>> = _peers.asStateFlow()
 
@@ -80,8 +83,60 @@ object SnowdropCoreBridge : AndroidCallback {
     private var cachedAuthURL = ""
     private lateinit var appContext: Context
 
+    data class StagedFile(
+        val uri: Uri,
+        val name: String,
+        val size: Long
+    ) {
+        val formattedSize: String
+            get() = when {
+                size >= 1024 * 1024 * 1024 -> String.format("%.2f GB", size.toDouble() / (1024 * 1024 * 1024))
+                size >= 1024 * 1024 -> String.format("%.1f MB", size.toDouble() / (1024 * 1024))
+                size >= 1024 -> String.format("%.0f KB", size.toDouble() / 1024)
+                size > 0 -> "$size B"
+                else -> "Unknown size"
+            }
+    }
+
+    fun getFileInfo(context: Context, uri: Uri): StagedFile {
+        var name = "file.bin"
+        var size = 0L
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (cursor.moveToFirst()) {
+                if (nameIdx >= 0) name = cursor.getString(nameIdx) ?: "file.bin"
+                if (sizeIdx >= 0) size = cursor.getLong(sizeIdx)
+            }
+        }
+        return StagedFile(uri, name, size)
+    }
+
+    fun getSavedDeviceName(context: Context): String {
+        val prefs = context.getSharedPreferences("snowdrop_prefs", Context.MODE_PRIVATE)
+        return prefs.getString("device_name", null) ?: "${Build.MANUFACTURER} ${Build.MODEL}"
+    }
+
+    fun setDeviceName(context: Context, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty()) return
+        val prefs = context.getSharedPreferences("snowdrop_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("device_name", trimmed).apply()
+        _deviceName.value = trimmed
+        restart(context)
+    }
+
+    fun restart(context: Context) {
+        stop()
+        scope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(500)
+            start()
+        }
+    }
+
     fun init(context: Context) {
         appContext = context.applicationContext
+        _deviceName.value = getSavedDeviceName(appContext)
         start()
     }
 
@@ -99,7 +154,8 @@ object SnowdropCoreBridge : AndroidCallback {
                     "Snowdrop"
                 ).apply { mkdirs() }.absolutePath
 
-                val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
+                val deviceName = getSavedDeviceName(appContext)
+                _deviceName.value = deviceName
                 Log.i(TAG, "Calling Core.startAndroidEngine with deviceName=$deviceName")
                 Core.startAndroidEngine(dataDir, downloadDir, deviceName, this@SnowdropCoreBridge)
                 Log.i(TAG, "Core.startAndroidEngine returned successfully")

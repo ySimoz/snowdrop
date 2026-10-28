@@ -24,9 +24,18 @@ public final class SnowdropEngine: ObservableObject {
         let defaultDownloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
         self.downloadDirectory = defaultDownloads
-        self.deviceName = Host.current().localizedName ?? "Mac"
+        let savedName = UserDefaults.standard.string(forKey: "SnowdropDeviceName")
+        self.deviceName = savedName ?? (Host.current().localizedName ?? "Mac")
 
         setupNotifications()
+    }
+
+    public func setDeviceName(_ newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        UserDefaults.standard.set(trimmed, forKey: "SnowdropDeviceName")
+        self.deviceName = trimmed
+        restart()
     }
 
     public func start() {

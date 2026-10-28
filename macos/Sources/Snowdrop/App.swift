@@ -8,76 +8,40 @@ struct SnowdropApp: App {
     @ObservedObject var engine = SnowdropEngine.shared
 
     var body: some Scene {
-        Window("Snowdrop", id: "main") {
+        MenuBarExtra("Snowdrop", systemImage: "camera.macro") {
             MenuBarView()
-                .frame(width: 340, height: 520)
+                .frame(width: 320, height: 480)
                 .onOpenURL { url in
-                    if let peer = SnowdropEngine.shared.peers.first {
-                        SnowdropEngine.shared.sendFile(to: peer, fileURL: url)
-                    }
+                    handleIncomingURL(url)
                 }
         }
-        .windowResizability(.contentSize)
+        .menuBarExtraStyle(.window)
+    }
+
+    private func handleIncomingURL(_ url: URL) {
+        if url.scheme == "snowdrop" {
+            guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+            if components.host == "send", let path = components.queryItems?.first(where: { $0.name == "path" })?.value {
+                let fileURL = URL(fileURLWithPath: path)
+                if let peer = engine.peers.first {
+                    engine.sendFile(to: peer, fileURL: fileURL)
+                }
+            }
+        } else if let peer = engine.peers.first {
+            engine.sendFile(to: peer, fileURL: url)
+        }
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    var statusItem: NSStatusItem?
-
+class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
+        // Prevent AppKit from terminating the daemon when the popover is dismissed
+        ProcessInfo.processInfo.disableAutomaticTermination("Snowdrop background engine")
 
         SnowdropEngine.shared.start()
-        setupStatusItem()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            if let win = self.findMainWindow() {
-                win.delegate = self
-            }
-        }
+        NSApp.servicesProvider = self
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-    }
-
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        sender.orderOut(nil)
-        return false
-    }
-
-    private func setupStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = item.button {
-            button.image = NSImage(systemSymbolName: "camera.macro", accessibilityDescription: "Snowdrop")
-            button.title = " Snowdrop"
-            button.target = self
-            button.action = #selector(statusItemClicked)
-        }
-        self.statusItem = item
-    }
-
-    private func findMainWindow() -> NSWindow? {
-        return NSApp.windows.first(where: {
-            $0.title == "Snowdrop" || $0.identifier?.rawValue == "main"
-        })
-    }
-
-    @objc private func statusItemClicked() {
-        if let win = findMainWindow() {
-            if win.isVisible && win.isKeyWindow {
-                win.orderOut(nil)
-            } else {
-                win.makeKeyAndOrderFront(nil)
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        }
-    }
-
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
-            findMainWindow()?.makeKeyAndOrderFront(nil)
-        }
-        return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -85,8 +49,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        if let peer = SnowdropEngine.shared.peers.first, let url = urls.first {
-            SnowdropEngine.shared.sendFile(to: peer, fileURL: url)
+        for url in urls {
+            if url.scheme == "snowdrop" {
+                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   components.host == "send",
+                   let path = components.queryItems?.first(where: { $0.name == "path" })?.value {
+                    let fileURL = URL(fileURLWithPath: path)
+                    if let peer = SnowdropEngine.shared.peers.first {
+                        SnowdropEngine.shared.sendFile(to: peer, fileURL: fileURL)
+                    }
+                }
+            } else if let peer = SnowdropEngine.shared.peers.first {
+                SnowdropEngine.shared.sendFile(to: peer, fileURL: url)
+            }
         }
     }
 
@@ -99,7 +74,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return false
     }
 
+    @objc func handleSendService(_ pboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        guard let items = pboard.pasteboardItems else { return }
+        for item in items {
+            if let str = item.string(forType: .fileURL), let url = URL(string: str) {
+                if let peer = SnowdropEngine.shared.peers.first {
+                    SnowdropEngine.shared.sendFile(to: peer, fileURL: url)
+                    return
+                }
+            }
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         SnowdropEngine.shared.stop()
     }
 }
+
