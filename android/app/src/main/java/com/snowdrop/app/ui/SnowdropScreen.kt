@@ -94,11 +94,12 @@ fun SnowdropScreen(
                                         customTabs.launchUrl(context, Uri.parse(authUrl))
                                     }
                                 },
+                                enabled = authUrl.isNotEmpty(),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(Icons.Default.OpenInNew, contentDescription = null)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Sign in with Tailscale")
+                                Text(if (authUrl.isNotEmpty()) "Sign in with Tailscale" else "Obtaining sign-in link...")
                             }
                         }
                     }
@@ -145,7 +146,11 @@ fun SnowdropScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                if (status is EngineStatus.Connected) "No online peers detected on Tailnet." else "Connecting to Tailnet...",
+                                when {
+                                    status is EngineStatus.Connected -> "No online peers detected on Tailnet."
+                                    status is EngineStatus.NeedsAuth -> "Sign in with Tailscale above to see peers."
+                                    else -> "Connecting to Tailnet..."
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

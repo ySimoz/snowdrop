@@ -5,9 +5,45 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"sync"
+
+	"github.com/wlynxg/anet"
+	"tailscale.com/net/netmon"
 )
+
+func init() {
+	netmon.RegisterInterfaceGetter(func() ([]netmon.Interface, error) {
+		ifaces, err := anet.Interfaces()
+		if err != nil || len(ifaces) == 0 {
+			return []netmon.Interface{
+				{
+					Interface: &net.Interface{
+						Index: 1,
+						MTU:   1500,
+						Name:  "lo",
+						Flags: net.FlagUp | net.FlagLoopback,
+					},
+				},
+			}, nil
+		}
+
+		var res []netmon.Interface
+		for i := range ifaces {
+			iface := ifaces[i]
+			var addrs []net.Addr
+			if a, err := anet.InterfaceAddrsByInterface(&iface); err == nil {
+				addrs = a
+			}
+			res = append(res, netmon.Interface{
+				Interface: &iface,
+				AltAddrs:  addrs,
+			})
+		}
+		return res, nil
+	})
+}
 
 // AndroidCallback defines the gomobile callback interface
 type AndroidCallback interface {
@@ -26,11 +62,11 @@ var (
 // StartAndroidEngine initializes and starts the core engine on Android
 func StartAndroidEngine(dataDir string, downloadDir string, deviceName string, cb AndroidCallback) error {
 	androidMu.Lock()
-	defer androidMu.Unlock()
-
 	if androidEngine != nil {
+		androidMu.Unlock()
 		return nil
 	}
+	androidMu.Unlock()
 
 	cfg := &EngineConfig{
 		DataDir:     dataDir,
@@ -72,7 +108,9 @@ func StartAndroidEngine(dataDir string, downloadDir string, deviceName string, c
 		return err
 	}
 
+	androidMu.Lock()
 	androidEngine = eng
+	androidMu.Unlock()
 	return nil
 }
 

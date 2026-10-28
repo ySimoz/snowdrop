@@ -144,7 +144,7 @@ public struct MenuBarView: View {
                         Image(systemName: "network.slash")
                             .font(.system(size: 20))
                             .foregroundColor(.secondary.opacity(0.6))
-                        Text(engine.status == .connected ? "No peers found on Tailnet" : "Waiting for connection...")
+                        Text(peersEmptyMessage)
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -257,6 +257,14 @@ public struct MenuBarView: View {
 
     // MARK: - Helpers
 
+    private var peersEmptyMessage: String {
+        switch engine.status {
+        case .connected: return "No peers found on Tailnet"
+        case .needsAuth: return "Sign in above to see peers"
+        default: return "Waiting for connection..."
+        }
+    }
+
     private var statusColor: Color {
         switch engine.status {
         case .connected: return .green
@@ -365,8 +373,7 @@ struct SettingsPopoverView: View {
             Divider()
 
             Button("Restart Tailscale Stack") {
-                engine.stop()
-                engine.start()
+                engine.restart()
             }
             .font(.system(size: 11))
             .controlSize(.small)

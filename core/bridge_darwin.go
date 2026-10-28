@@ -67,11 +67,11 @@ func RegisterCallbacks(
 //export StartEngine
 func StartEngine(dataDir *C.char, downloadDir *C.char, deviceName *C.char) C.int {
 	darwinMu.Lock()
-	defer darwinMu.Unlock()
-
 	if activeEngine != nil {
+		darwinMu.Unlock()
 		return 0
 	}
+	darwinMu.Unlock()
 
 	dDir := C.GoString(dataDir)
 	dlDir := C.GoString(downloadDir)
@@ -144,7 +144,9 @@ func StartEngine(dataDir *C.char, downloadDir *C.char, deviceName *C.char) C.int
 		return -2
 	}
 
+	darwinMu.Lock()
 	activeEngine = eng
+	darwinMu.Unlock()
 	return 0
 }
 

@@ -29,6 +29,7 @@ type Engine struct {
 	wg        sync.WaitGroup
 	mu        sync.Mutex
 	status    int
+	authURL   string
 	lastPeers string
 }
 
@@ -64,9 +65,6 @@ func NewEngine(cfg *EngineConfig) (*Engine, error) {
 
 // Start begins tsnet operation and HTTP service listener asynchronously
 func (e *Engine) Start() error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	if err := os.MkdirAll(e.config.DataDir, 0700); err != nil {
 		return fmt.Errorf("failed to create data dir: %w", err)
 	}
@@ -74,9 +72,16 @@ func (e *Engine) Start() error {
 		return fmt.Errorf("failed to create download dir: %w", err)
 	}
 
+	_ = os.Setenv("TS_LOGS_DIR", e.config.DataDir)
+	_ = os.Setenv("TMPDIR", e.config.DataDir)
+	if os.Getenv("HOME") == "" {
+		_ = os.Setenv("HOME", e.config.DataDir)
+	}
+
 	sanitizedName := sanitizeHostname(e.config.DeviceName)
 	serverHostname := fmt.Sprintf("snowdrop-%s", sanitizedName)
 
+	e.mu.Lock()
 	e.tsServer = &tsnet.Server{
 		Dir:       e.config.DataDir,
 		Hostname:  serverHostname,
@@ -84,17 +89,27 @@ func (e *Engine) Start() error {
 		UserLogf: func(format string, args ...any) {
 			msg := fmt.Sprintf(format, args...)
 			authURL := extractURL(msg)
-			if authURL != "" && e.config.OnAuthRequired != nil {
-				e.config.OnAuthRequired(authURL)
+			if authURL != "" {
+				e.mu.Lock()
+				e.authURL = authURL
+				e.mu.Unlock()
+				if e.config.OnAuthRequired != nil {
+					e.config.OnAuthRequired(authURL)
+				}
+				e.updateStatus(StatusNeedsAuth, "NeedsLogin")
 			}
 		},
 	}
+	e.status = StatusConnecting
+	e.mu.Unlock()
 
 	e.wg.Add(2)
 	go e.runServer(serverHostname)
 	go e.monitorStatus()
 
-	e.updateStatus(StatusConnecting, "starting")
+	if e.config.OnStatusChange != nil {
+		e.config.OnStatusChange(StatusConnecting, "starting")
+	}
 	return nil
 }
 
@@ -153,17 +168,32 @@ func (e *Engine) monitorStatus() {
 				continue
 			}
 
-			if st.AuthURL != "" && e.config.OnAuthRequired != nil {
-				e.config.OnAuthRequired(st.AuthURL)
+			if st.AuthURL != "" {
+				e.mu.Lock()
+				e.authURL = st.AuthURL
+				e.mu.Unlock()
+				if e.config.OnAuthRequired != nil {
+					e.config.OnAuthRequired(st.AuthURL)
+				}
 			}
 
 			switch st.BackendState {
+			case "Running":
+				e.mu.Lock()
+				e.authURL = ""
+				e.mu.Unlock()
+				e.updateStatus(StatusConnected, "connected")
 			case "NeedsLogin", "NeedsMachineAuth":
 				e.updateStatus(StatusNeedsAuth, st.BackendState)
-			case "Running":
-				e.updateStatus(StatusConnected, "connected")
 			case "Starting":
-				e.updateStatus(StatusConnecting, "starting")
+				e.mu.Lock()
+				hasAuth := e.authURL != ""
+				e.mu.Unlock()
+				if hasAuth {
+					e.updateStatus(StatusNeedsAuth, "NeedsLogin")
+				} else {
+					e.updateStatus(StatusConnecting, "starting")
+				}
 			case "Stopped", "NoState":
 				e.updateStatus(StatusDisconnected, st.BackendState)
 			}
@@ -183,7 +213,7 @@ func (e *Engine) syncPeers(st any) {
 		return
 	}
 
-	var peerList []PeerInfo
+	peerList := make([]PeerInfo, 0)
 	for _, pk := range ipnSt.Peers() {
 		peer := ipnSt.Peer[pk]
 		if peer == nil {
@@ -228,7 +258,7 @@ func (e *Engine) updateStatus(st int, msg string) {
 	}
 }
 
-// Stop terminates the engine and listeners
+// Stop terminates the engine and listeners asynchronously without blocking
 func (e *Engine) Stop() {
 	e.mu.Lock()
 	if e.cancel != nil {
@@ -245,8 +275,10 @@ func (e *Engine) Stop() {
 	}
 	e.mu.Unlock()
 
-	e.wg.Wait()
-	e.updateStatus(StatusDisconnected, "stopped")
+	go func() {
+		e.wg.Wait()
+		e.updateStatus(StatusDisconnected, "stopped")
+	}()
 }
 
 // SendFile initiates an outbound file transfer to a peer IP

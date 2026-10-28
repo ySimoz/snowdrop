@@ -16,7 +16,7 @@ struct SnowdropApp: App {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var statusItem: NSStatusItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -26,7 +26,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         SnowdropEngine.shared.start()
         setupStatusItem()
 
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            if let win = self.findMainWindow() {
+                win.delegate = self
+            }
+        }
+
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        return false
     }
 
     private func setupStatusItem() {
@@ -40,9 +51,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem = item
     }
 
+    private func findMainWindow() -> NSWindow? {
+        return NSApp.windows.first(where: {
+            $0.title == "Snowdrop" || $0.identifier?.rawValue == "main"
+        })
+    }
+
     @objc private func statusItemClicked() {
-        if let win = NSApp.windows.first(where: { $0.title == "Snowdrop" }) {
-            if win.isVisible {
+        if let win = findMainWindow() {
+            if win.isVisible && win.isKeyWindow {
                 win.orderOut(nil)
             } else {
                 win.makeKeyAndOrderFront(nil)
@@ -53,9 +70,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
-            NSApp.windows.first(where: { $0.title == "Snowdrop" })?.makeKeyAndOrderFront(nil)
+            findMainWindow()?.makeKeyAndOrderFront(nil)
         }
         return true
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {

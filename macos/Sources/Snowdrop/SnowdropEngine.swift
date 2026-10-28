@@ -16,6 +16,7 @@ public final class SnowdropEngine: ObservableObject {
     @Published public var deviceName: String
 
     private var isEngineRunning = false
+    private var cachedAuthURL: String = ""
     private var lastProgressCheck: Date = Date()
     private var lastBytesCount: Int64 = 0
 
@@ -64,6 +65,7 @@ public final class SnowdropEngine: ObservableObject {
             )
 
             let code = StartEngine(dataDir, dlDir, devName)
+            NSLog("[Snowdrop] StartEngine returned code: %d", code)
             DispatchQueue.main.async {
                 if code == 0 {
                     self.status = .connecting
@@ -77,17 +79,36 @@ public final class SnowdropEngine: ObservableObject {
 
     public func stop() {
         guard isEngineRunning else { return }
-        StopEngine()
         isEngineRunning = false
         DispatchQueue.main.async {
             self.status = .disconnected
             self.peers = []
             self.activeTransfer = nil
         }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            StopEngine()
+        }
+    }
+
+    public func restart() {
+        stop()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.start()
+        }
     }
 
     public func openAuthURL() {
-        if case .needsAuth(let urlString) = status, let url = URL(string: urlString) {
+        let urlString: String
+        if case .needsAuth(let url) = status, !url.isEmpty {
+            urlString = url
+        } else if !cachedAuthURL.isEmpty {
+            urlString = cachedAuthURL
+        } else {
+            return
+        }
+
+        if let url = URL(string: urlString) {
             NSWorkspace.shared.open(url)
         }
     }
@@ -141,19 +162,21 @@ public final class SnowdropEngine: ObservableObject {
     // MARK: - Internal Callback Handlers
 
     func handleStatusChange(status: Int, message: String) {
+        NSLog("[Snowdrop] handleStatusChange: %d, msg: %@", status, message)
         DispatchQueue.main.async {
             switch status {
             case 0:
                 self.status = .disconnected
             case 1:
-                if case .needsAuth = self.status {
-                    // retain current auth url
-                } else {
-                    self.status = .needsAuth(url: "")
-                }
+                self.status = .needsAuth(url: self.cachedAuthURL)
             case 2:
-                self.status = .connecting
+                if self.cachedAuthURL.isEmpty {
+                    self.status = .connecting
+                } else {
+                    self.status = .needsAuth(url: self.cachedAuthURL)
+                }
             case 3:
+                self.cachedAuthURL = ""
                 self.status = .connected
             case 4:
                 self.status = .error(message: message)
@@ -164,12 +187,17 @@ public final class SnowdropEngine: ObservableObject {
     }
 
     func handleAuthRequired(url: String) {
+        NSLog("[Snowdrop] handleAuthRequired: %@", url)
         DispatchQueue.main.async {
-            self.status = .needsAuth(url: url)
+            if !url.isEmpty {
+                self.cachedAuthURL = url
+            }
+            self.status = .needsAuth(url: self.cachedAuthURL)
         }
     }
 
     func handlePeersUpdated(json: String) {
+        NSLog("[Snowdrop] handlePeersUpdated: %@", json)
         guard let data = json.data(using: .utf8) else { return }
         do {
             let decoded = try JSONDecoder().decode([PeerItem].self, from: data)

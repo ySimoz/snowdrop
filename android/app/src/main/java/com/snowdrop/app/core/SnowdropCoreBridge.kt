@@ -77,6 +77,7 @@ object SnowdropCoreBridge : AndroidCallback {
     val recentTransfers: StateFlow<List<TransferItem>> = _recentTransfers.asStateFlow()
 
     private var isRunning = false
+    private var cachedAuthURL = ""
     private lateinit var appContext: Context
 
     fun init(context: Context) {
@@ -86,33 +87,43 @@ object SnowdropCoreBridge : AndroidCallback {
 
     fun start() {
         if (isRunning) return
-        try {
-            val dataDir = appContext.filesDir.absolutePath
-            val downloadDir = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                "Snowdrop"
-            ).apply { mkdirs() }.absolutePath
+        isRunning = true
+        _status.value = EngineStatus.Connecting
+        Log.i(TAG, "Starting Snowdrop engine...")
 
-            val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
-            Core.startAndroidEngine(dataDir, downloadDir, deviceName, this)
-            isRunning = true
-            _status.value = EngineStatus.Connecting
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed starting Snowdrop engine", e)
-            _status.value = EngineStatus.Error(e.message ?: "Failed starting engine")
+        scope.launch(Dispatchers.IO) {
+            try {
+                val dataDir = appContext.filesDir.absolutePath
+                val downloadDir = File(
+                    appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: appContext.filesDir,
+                    "Snowdrop"
+                ).apply { mkdirs() }.absolutePath
+
+                val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
+                Log.i(TAG, "Calling Core.startAndroidEngine with deviceName=$deviceName")
+                Core.startAndroidEngine(dataDir, downloadDir, deviceName, this@SnowdropCoreBridge)
+                Log.i(TAG, "Core.startAndroidEngine returned successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed starting Snowdrop engine", e)
+                isRunning = false
+                _status.value = EngineStatus.Error(e.message ?: "Failed starting engine")
+            }
         }
     }
 
     fun stop() {
         if (!isRunning) return
-        try {
-            Core.stopAndroidEngine()
-            isRunning = false
-            _status.value = EngineStatus.Disconnected
-            _peers.value = emptyList()
-            _activeTransfer.value = null
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed stopping engine", e)
+        isRunning = false
+        _status.value = EngineStatus.Disconnected
+        _peers.value = emptyList()
+        _activeTransfer.value = null
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                Core.stopAndroidEngine()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed stopping engine", e)
+            }
         }
     }
 
@@ -162,29 +173,40 @@ object SnowdropCoreBridge : AndroidCallback {
     // MARK: - AndroidCallback Implementation
 
     override fun onStatusChange(status: Long, message: String) {
+        Log.i(TAG, "onStatusChange: status=$status, message=$message, cachedURL=$cachedAuthURL")
         scope.launch {
             _status.value = when (status) {
                 Core.StatusDisconnected -> EngineStatus.Disconnected
-                Core.StatusNeedsAuth -> {
-                    val current = _status.value
-                    if (current is EngineStatus.NeedsAuth) current else EngineStatus.NeedsAuth("")
+                Core.StatusNeedsAuth -> EngineStatus.NeedsAuth(cachedAuthURL)
+                Core.StatusConnecting -> {
+                    if (cachedAuthURL.isNotEmpty()) EngineStatus.NeedsAuth(cachedAuthURL) else EngineStatus.Connecting
                 }
-                Core.StatusConnecting -> EngineStatus.Connecting
-                Core.StatusConnected -> EngineStatus.Connected
+                Core.StatusConnected -> {
+                    cachedAuthURL = ""
+                    EngineStatus.Connected
+                }
                 else -> EngineStatus.Error(message)
             }
         }
     }
 
     override fun onAuthRequired(authURL: String) {
+        Log.i(TAG, "onAuthRequired: authURL=$authURL")
         scope.launch {
-            _status.value = EngineStatus.NeedsAuth(authURL)
+            if (authURL.isNotEmpty()) {
+                cachedAuthURL = authURL
+            }
+            _status.value = EngineStatus.NeedsAuth(cachedAuthURL)
         }
     }
 
     override fun onPeersUpdated(peersJSON: String) {
         scope.launch {
             try {
+                if (peersJSON.isEmpty() || peersJSON == "null") {
+                    _peers.value = emptyList()
+                    return@launch
+                }
                 val array = JSONArray(peersJSON)
                 val list = mutableListOf<PeerItem>()
                 for (i in 0 until array.length()) {
@@ -206,6 +228,7 @@ object SnowdropCoreBridge : AndroidCallback {
                     )
                 }
                 _peers.value = list
+                Log.i(TAG, "onPeersUpdated: loaded ${list.size} peers: ${list.map { "${it.displayName} (${it.primaryIP})" }}")
             } catch (e: Exception) {
                 Log.e(TAG, "Error parsing peers", e)
             }
