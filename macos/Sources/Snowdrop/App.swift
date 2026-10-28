@@ -5,40 +5,87 @@ import UserNotifications
 @main
 struct SnowdropApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @ObservedObject var engine = SnowdropEngine.shared
 
     var body: some Scene {
-        MenuBarExtra("Snowdrop", systemImage: "camera.macro") {
-            MenuBarView()
-                .frame(width: 320, height: 480)
-                .onOpenURL { url in
-                    handleIncomingURL(url)
-                }
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
+    }
+}
+
+class StatusItemManager: NSObject {
+    static let shared = StatusItemManager()
+    var statusItem: NSStatusItem?
+    var popover: NSPopover?
+
+    func setup() {
+        let pop = NSPopover()
+        pop.contentSize = NSSize(width: 320, height: 460)
+        pop.behavior = .transient
+        pop.contentViewController = NSHostingController(rootView: MenuBarView())
+        self.popover = pop
+
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            button.image = NSImage(systemSymbolName: "camera.macro", accessibilityDescription: "Snowdrop")
+            button.target = self
+            button.action = #selector(togglePopover)
+        }
+        self.statusItem = item
     }
 
-    private func handleIncomingURL(_ url: URL) {
-        if url.scheme == "snowdrop" {
-            guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
-            if components.host == "send", let path = components.queryItems?.first(where: { $0.name == "path" })?.value {
-                let fileURL = URL(fileURLWithPath: path)
-                if let peer = engine.peers.first {
-                    engine.sendFile(to: peer, fileURL: fileURL)
-                }
+    @objc func togglePopover() {
+        guard let pop = popover, let button = statusItem?.button else { return }
+        if pop.isShown {
+            pop.performClose(nil)
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            pop.contentViewController?.view.window?.makeKey()
+        }
+    }
+
+    func showPopover() {
+        guard let pop = popover, let button = statusItem?.button else { return }
+        if !pop.isShown {
+            NSApp.activate(ignoringOtherApps: true)
+            pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            pop.contentViewController?.view.window?.makeKey()
+        }
+    }
+
+    func selectFile() {
+        guard let pop = popover else { return }
+        // Keep popover pinned open so opening NSOpenPanel does NOT dismiss it
+        pop.behavior = .applicationDefined
+
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose File"
+        panel.level = .floating
+
+        NSApp.activate(ignoringOtherApps: true)
+        panel.begin { [weak self] response in
+            if response == .OK, let url = panel.url {
+                SnowdropEngine.shared.stageFile(url)
             }
-        } else if let peer = engine.peers.first {
-            engine.sendFile(to: peer, fileURL: url)
+            // Restore transient auto-close behavior after selection or cancel
+            DispatchQueue.main.async {
+                self?.popover?.behavior = .transient
+                self?.popover?.contentViewController?.view.window?.makeKey()
+            }
         }
     }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Prevent AppKit from terminating the daemon when the popover is dismissed
         ProcessInfo.processInfo.disableAutomaticTermination("Snowdrop background engine")
 
         SnowdropEngine.shared.start()
+        StatusItemManager.shared.setup()
         NSApp.servicesProvider = self
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -55,33 +102,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                    components.host == "send",
                    let path = components.queryItems?.first(where: { $0.name == "path" })?.value {
                     let fileURL = URL(fileURLWithPath: path)
-                    if let peer = SnowdropEngine.shared.peers.first {
-                        SnowdropEngine.shared.sendFile(to: peer, fileURL: fileURL)
-                    }
+                    SnowdropEngine.shared.stageFile(fileURL)
+                    StatusItemManager.shared.showPopover()
                 }
-            } else if let peer = SnowdropEngine.shared.peers.first {
-                SnowdropEngine.shared.sendFile(to: peer, fileURL: url)
+            } else {
+                SnowdropEngine.shared.stageFile(url)
+                StatusItemManager.shared.showPopover()
             }
         }
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
         let fileURL = URL(fileURLWithPath: filename)
-        if let peer = SnowdropEngine.shared.peers.first {
-            SnowdropEngine.shared.sendFile(to: peer, fileURL: fileURL)
-            return true
-        }
-        return false
+        SnowdropEngine.shared.stageFile(fileURL)
+        StatusItemManager.shared.showPopover()
+        return true
     }
 
     @objc func handleSendService(_ pboard: NSPasteboard, userData: String, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
         guard let items = pboard.pasteboardItems else { return }
         for item in items {
             if let str = item.string(forType: .fileURL), let url = URL(string: str) {
-                if let peer = SnowdropEngine.shared.peers.first {
-                    SnowdropEngine.shared.sendFile(to: peer, fileURL: url)
-                    return
-                }
+                SnowdropEngine.shared.stageFile(url)
+                StatusItemManager.shared.showPopover()
+                return
             }
         }
     }
@@ -90,4 +134,3 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         SnowdropEngine.shared.stop()
     }
 }
-

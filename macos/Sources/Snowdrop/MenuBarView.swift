@@ -7,38 +7,8 @@ public final class MenuBarViewModel: ObservableObject {
     @Published public var showingSettings = false
     @Published public var showingRenameDialog = false
     @Published public var renameText = ""
-    @Published public var stagedFileURL: URL?
-    @Published public var stagedFileName: String = ""
-    @Published public var stagedFileSizeFormatted: String = ""
-    @Published public var selectedPeerForDrop: PeerItem?
-    @Published public var pendingDropURL: URL?
 
     public init() {}
-
-    public func stageFile(_ url: URL) {
-        self.stagedFileURL = url
-        self.stagedFileName = url.lastPathComponent
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-           let size = attrs[.size] as? Int64 {
-            if size >= 1024 * 1024 * 1024 {
-                self.stagedFileSizeFormatted = String(format: "%.2f GB", Double(size) / (1024 * 1024 * 1024))
-            } else if size >= 1024 * 1024 {
-                self.stagedFileSizeFormatted = String(format: "%.1f MB", Double(size) / (1024 * 1024))
-            } else if size >= 1024 {
-                self.stagedFileSizeFormatted = String(format: "%.0f KB", Double(size) / 1024)
-            } else {
-                self.stagedFileSizeFormatted = "\(size) B"
-            }
-        } else {
-            self.stagedFileSizeFormatted = ""
-        }
-    }
-
-    public func clearStagedFile() {
-        self.stagedFileURL = nil
-        self.stagedFileName = ""
-        self.stagedFileSizeFormatted = ""
-    }
 }
 
 public struct MenuBarView: View {
@@ -124,6 +94,7 @@ public struct MenuBarView: View {
                         .foregroundColor(.secondary)
 
                     Button(action: {
+                        vm.renameText = engine.deviceName
                         vm.showingRenameDialog = true
                     }) {
                         Image(systemName: "pencil")
@@ -181,23 +152,23 @@ public struct MenuBarView: View {
 
     private var stagedFileOrDropView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("PREPARE FILE TO SEND")
+            Text("FILE")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(.secondary)
 
-            if let _ = vm.stagedFileURL {
+            if let _ = engine.stagedFileURL {
                 HStack(spacing: 10) {
                     Image(systemName: "doc.fill")
                         .font(.system(size: 22))
                         .foregroundColor(.accentColor)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(vm.stagedFileName)
+                        Text(engine.stagedFileName)
                             .font(.system(size: 12, weight: .semibold))
                             .lineLimit(1)
 
-                        if !vm.stagedFileSizeFormatted.isEmpty {
-                            Text(vm.stagedFileSizeFormatted)
+                        if !engine.stagedFileSizeFormatted.isEmpty {
+                            Text(engine.stagedFileSizeFormatted)
                                 .font(.system(size: 10))
                                 .foregroundColor(.secondary)
                         }
@@ -205,7 +176,7 @@ public struct MenuBarView: View {
 
                     Spacer()
 
-                    Button(action: { vm.clearStagedFile() }) {
+                    Button(action: { engine.clearStagedFile() }) {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundColor(.secondary)
                             .font(.system(size: 16))
@@ -228,23 +199,19 @@ public struct MenuBarView: View {
 
     private var dropZoneView: some View {
         Button(action: {
-            selectFileToStage()
+            StatusItemManager.shared.selectFile()
         }) {
             VStack(spacing: 6) {
-                Image(systemName: "tray.and.arrow.down")
-                    .font(.system(size: 20))
+                Image(systemName: "paperclip")
+                    .font(.system(size: 18))
                     .foregroundColor(vm.isTargetedForDrop ? .accentColor : .secondary)
 
-                Text("Drop file here or click to select")
-                    .font(.system(size: 11, weight: .medium))
+                Text("Choose File")
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundColor(vm.isTargetedForDrop ? .accentColor : .primary)
-
-                Text("Supports any file type")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 68)
+            .frame(height: 56)
             .background(vm.isTargetedForDrop ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06))
             .cornerRadius(8)
             .overlay(
@@ -261,7 +228,7 @@ public struct MenuBarView: View {
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 if let fileURL = url {
                     DispatchQueue.main.async {
-                        vm.stageFile(fileURL)
+                        engine.stageFile(fileURL)
                     }
                 }
             }
@@ -272,17 +239,9 @@ public struct MenuBarView: View {
     private var peersSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("AVAILABLE DEVICES (\(engine.peers.count))")
+                Text("DEVICES (\(engine.peers.count))")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(.secondary)
-
-                Spacer()
-
-                if vm.stagedFileURL != nil {
-                    Text("Ready to send")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.accentColor)
-                }
             }
 
             if engine.peers.isEmpty {
@@ -329,21 +288,15 @@ public struct MenuBarView: View {
                     Text(peer.online ? "Connected" : "Offline")
                         .font(.system(size: 9))
                         .foregroundColor(peer.online ? .green : .secondary)
-
-                    if let ip = peer.primaryIP {
-                        Text("• \(ip)")
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundColor(.secondary)
-                    }
                 }
             }
 
             Spacer()
 
             Button(action: {
-                if let staged = vm.stagedFileURL {
+                if let staged = engine.stagedFileURL {
                     engine.sendFile(to: peer, fileURL: staged)
-                    vm.clearStagedFile()
+                    engine.clearStagedFile()
                 }
             }) {
                 Text("Send")
@@ -351,7 +304,7 @@ public struct MenuBarView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .disabled(!peer.online || engine.activeTransfer != nil || vm.stagedFileURL == nil)
+            .disabled(!peer.online || engine.activeTransfer != nil || engine.stagedFileURL == nil)
         }
         .padding(8)
         .background(Color(NSColor.controlBackgroundColor))
@@ -400,32 +353,6 @@ public struct MenuBarView: View {
         case .needsAuth: return .orange
         case .connecting: return .yellow
         case .disconnected, .error: return .gray
-        }
-    }
-
-    private func promptFileSelection(for peer: PeerItem) {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Send to \(peer.displayName)"
-        NSApp.activate(ignoringOtherApps: true)
-
-        if panel.runModal() == .OK, let fileURL = panel.url {
-            engine.sendFile(to: peer, fileURL: fileURL)
-        }
-    }
-
-    private func selectFileToStage() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Select File"
-        NSApp.activate(ignoringOtherApps: true)
-
-        if panel.runModal() == .OK, let fileURL = panel.url {
-            vm.stageFile(fileURL)
         }
     }
 }

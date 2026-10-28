@@ -14,11 +14,39 @@ public final class SnowdropEngine: ObservableObject {
     @Published public var downloadDirectory: URL
     @Published public var autoAccept: Bool = true
     @Published public var deviceName: String
+    @Published public var stagedFileURL: URL?
+    @Published public var stagedFileName: String = ""
+    @Published public var stagedFileSizeFormatted: String = ""
 
     private var isEngineRunning = false
     private var cachedAuthURL: String = ""
     private var lastProgressCheck: Date = Date()
     private var lastBytesCount: Int64 = 0
+
+    public func stageFile(_ url: URL) {
+        self.stagedFileURL = url
+        self.stagedFileName = url.lastPathComponent
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? Int64 {
+            if size >= 1024 * 1024 * 1024 {
+                self.stagedFileSizeFormatted = String(format: "%.2f GB", Double(size) / (1024 * 1024 * 1024))
+            } else if size >= 1024 * 1024 {
+                self.stagedFileSizeFormatted = String(format: "%.1f MB", Double(size) / (1024 * 1024))
+            } else if size >= 1024 {
+                self.stagedFileSizeFormatted = String(format: "%.0f KB", Double(size) / 1024)
+            } else {
+                self.stagedFileSizeFormatted = "\(size) B"
+            }
+        } else {
+            self.stagedFileSizeFormatted = ""
+        }
+    }
+
+    public func clearStagedFile() {
+        self.stagedFileURL = nil
+        self.stagedFileName = ""
+        self.stagedFileSizeFormatted = ""
+    }
 
     private init() {
         let defaultDownloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
