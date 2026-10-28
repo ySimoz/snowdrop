@@ -166,12 +166,11 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 			return
 		}
 
-		defer func() {
+		cleanupPart := func() {
 			_ = tempFile.Close()
-			if _, statErr := os.Stat(tempPath); statErr == nil {
-				_ = os.Remove(tempPath)
-			}
-		}()
+			_ = os.Remove(tempPath)
+		}
+		defer cleanupPart()
 
 		hasher := sha256.New()
 		buf := make([]byte, BufferSize)
@@ -180,6 +179,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 		for {
 			select {
 			case <-ctx.Done():
+				cleanupPart()
 				if tm.config.OnTransferComplete != nil {
 					tm.config.OnTransferComplete(transferID, false, "transfer canceled")
 				}
@@ -191,6 +191,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 			n, readErr := r.Body.Read(buf)
 			if n > 0 {
 				if _, writeErr := tempFile.Write(buf[:n]); writeErr != nil {
+					cleanupPart()
 					msg := fmt.Sprintf("failed writing stream: %v", writeErr)
 					if tm.config.OnTransferComplete != nil {
 						tm.config.OnTransferComplete(transferID, false, msg)
@@ -209,6 +210,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 				if errors.Is(readErr, io.EOF) {
 					break
 				}
+				cleanupPart()
 				msg := fmt.Sprintf("failed reading stream: %v", readErr)
 				if tm.config.OnTransferComplete != nil {
 					tm.config.OnTransferComplete(transferID, false, msg)
@@ -222,6 +224,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 
 		calcHash := hex.EncodeToString(hasher.Sum(nil))
 		if calcHash != req.SHA256 {
+			cleanupPart()
 			msg := fmt.Sprintf("hash mismatch: expected %s, got %s", req.SHA256, calcHash)
 			if tm.config.OnTransferComplete != nil {
 				tm.config.OnTransferComplete(transferID, false, msg)

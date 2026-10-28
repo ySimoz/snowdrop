@@ -325,11 +325,11 @@ Phase 3: Android Client (/android)
 
 Phase 4: Verification & Edge Cases
 
-⚬ [ ] Campus Isolation Verification: Verify peer-to-peer data flow across distinct isolated client subnets.
+⚬ [x] Campus Isolation Verification: Verify peer-to-peer data flow across distinct isolated client subnets.
 
-⚬ [ ] DERP Relay Verification: Test behavior behind symmetric NAT to ensure graceful fallback without stalling.
+⚬ [x] DERP Relay Verification: Test behavior behind symmetric NAT to ensure graceful fallback without stalling.
 
-⚬ [ ] Large File Transfer: Test uninterrupted transfer of a $4\text{ GB}+$ ISO or video file with progress tracking and hash verification.
+⚬ [x] Large File Transfer: Test uninterrupted transfer of a $4\text{ GB}+$ ISO or video file with progress tracking and hash verification.
 
-⚬ [ ] Interrupted Connection Test: Ensure cancelling on either side immediately closes TCP stream connections and cleans up partial .tmp files.
+⚬ [x] Interrupted Connection Test: Ensure cancelling on either side immediately closes TCP stream connections and cleans up partial .tmp files.
 

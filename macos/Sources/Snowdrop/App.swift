@@ -11,6 +11,11 @@ struct SnowdropApp: App {
         Window("Snowdrop", id: "main") {
             MenuBarView()
                 .frame(width: 340, height: 520)
+                .onOpenURL { url in
+                    if let peer = SnowdropEngine.shared.peers.first {
+                        SnowdropEngine.shared.sendFile(to: peer, fileURL: url)
+                    }
+                }
         }
         .windowResizability(.contentSize)
     }
@@ -76,6 +81,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        if let peer = SnowdropEngine.shared.peers.first, let url = urls.first {
+            SnowdropEngine.shared.sendFile(to: peer, fileURL: url)
+        }
+    }
+
+    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        let fileURL = URL(fileURLWithPath: filename)
+        if let peer = SnowdropEngine.shared.peers.first {
+            SnowdropEngine.shared.sendFile(to: peer, fileURL: fileURL)
+            return true
+        }
         return false
     }
 

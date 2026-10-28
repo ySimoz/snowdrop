@@ -213,7 +213,8 @@ func (e *Engine) syncPeers(st any) {
 		return
 	}
 
-	peerList := make([]PeerInfo, 0)
+	var snowdropPeers []PeerInfo
+	var otherPeers []PeerInfo
 	for _, pk := range ipnSt.Peers() {
 		peer := ipnSt.Peer[pk]
 		if peer == nil {
@@ -225,14 +226,34 @@ func (e *Engine) syncPeers(st any) {
 			ips = append(ips, addr.String())
 		}
 
-		peerList = append(peerList, PeerInfo{
+		cleanHostName := peer.HostName
+		isSnowdrop := strings.HasPrefix(strings.ToLower(peer.HostName), "snowdrop-")
+		if isSnowdrop {
+			cleanHostName = strings.TrimPrefix(peer.HostName, "snowdrop-")
+		}
+
+		info := PeerInfo{
 			ID:          string(peer.ID),
-			HostName:    peer.HostName,
+			HostName:    cleanHostName,
 			DNSName:     strings.TrimSuffix(peer.DNSName, "."),
 			OS:          peer.OS,
 			IPAddresses: ips,
 			Online:      peer.Online,
-		})
+		}
+
+		if isSnowdrop {
+			snowdropPeers = append(snowdropPeers, info)
+		} else {
+			otherPeers = append(otherPeers, info)
+		}
+	}
+
+	peerList := snowdropPeers
+	if len(peerList) == 0 {
+		peerList = otherPeers
+	}
+	if peerList == nil {
+		peerList = make([]PeerInfo, 0)
 	}
 
 	bytes, err := json.Marshal(peerList)
