@@ -4,9 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -45,7 +43,6 @@ fun SnowdropScreen() {
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameInputText by remember { mutableStateOf("") }
 
-    // File picker launcher
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -57,7 +54,7 @@ fun SnowdropScreen() {
     if (showRenameDialog) {
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            title = { Text("Rename This Device") },
+            title = { Text("Rename Device") },
             text = {
                 OutlinedTextField(
                     value = renameInputText,
@@ -95,9 +92,9 @@ fun SnowdropScreen() {
                             imageVector = Icons.Default.FilterVintage,
                             contentDescription = "Snowdrop",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(24.dp)
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             "Snowdrop",
                             fontWeight = FontWeight.Bold,
@@ -118,52 +115,38 @@ fun SnowdropScreen() {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Section 1: Device Header & Identity
+            // Device Identity
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Icon(
+                        imageVector = Icons.Default.Smartphone,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        currentDeviceName.ifEmpty { "My Device" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = {
+                            renameInputText = currentDeviceName
+                            showRenameDialog = true
+                        }
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Smartphone,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(22.dp)
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Rename",
+                            modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "THIS DEVICE",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                currentDeviceName.ifEmpty { "Android Device" },
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        IconButton(
-                            onClick = {
-                                renameInputText = currentDeviceName
-                                showRenameDialog = true
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = "Rename Device",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
                     }
                 }
             }
@@ -174,23 +157,17 @@ fun SnowdropScreen() {
                     val authUrl = (status as EngineStatus.NeedsAuth).url
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                "Tailscale Authentication Required",
+                                "Sign in Required",
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                "Authorize this device on your Tailnet to discover and stream files with peers.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                            Spacer(modifier = Modifier.height(14.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
                             Button(
                                 onClick = {
                                     if (authUrl.isNotEmpty()) {
@@ -200,18 +177,16 @@ fun SnowdropScreen() {
                                 },
                                 enabled = authUrl.isNotEmpty(),
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(10.dp)
                             ) {
-                                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(if (authUrl.isNotEmpty()) "Sign in with Tailscale" else "Obtaining link...")
+                                Text("Sign in with Tailscale")
                             }
                         }
                     }
                 }
             }
 
-            // Section 2: Active Transfer (if ongoing)
+            // Active Transfer
             activeTransfer?.let { transfer ->
                 item {
                     Text(
@@ -220,7 +195,7 @@ fun SnowdropScreen() {
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     ActiveTransferCard(
                         transfer = transfer,
                         onCancel = { SnowdropCoreBridge.cancelTransfer(transfer.id) }
@@ -228,95 +203,59 @@ fun SnowdropScreen() {
                 }
             }
 
-            // Section 3: File Staging & Selection (Two-Step Flow)
+            // File Selection / Staging
             item {
                 Text(
-                    "PREPARE FILE TO SEND",
+                    "FILE",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.secondary
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
                 if (stagedFile == null) {
-                    Card(
+                    FilledTonalButton(
                         onClick = { filePickerLauncher.launch("*/*") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(18.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AddBox,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "Select File to Send",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    "Choose any photo, video, or document",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            FilledTonalButton(
-                                onClick = { filePickerLauncher.launch("*/*") },
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text("Browse")
-                            }
-                        }
+                        Icon(
+                            imageVector = Icons.Default.AttachFile,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Choose File",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 } else {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.InsertDriveFile,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(14.dp))
+                            Icon(
+                                imageVector = Icons.Default.InsertDriveFile,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     stagedFile!!.name,
-                                    style = MaterialTheme.typography.titleSmall,
+                                    style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -327,13 +266,11 @@ fun SnowdropScreen() {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            IconButton(
-                                onClick = { stagedFile = null }
-                            ) {
+                            IconButton(onClick = { stagedFile = null }) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "Cancel Selection",
-                                    tint = MaterialTheme.colorScheme.error
+                                    contentDescription = "Clear",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -341,61 +278,38 @@ fun SnowdropScreen() {
                 }
             }
 
-            // Section 4: Available Devices (Peers)
+            // Available Devices
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "AVAILABLE DEVICES (${peers.size})",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                    if (stagedFile != null) {
-                        Text(
-                            "Tap device below to send",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
+                Text(
+                    "DEVICES (${peers.size})",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.secondary
+                )
             }
 
             if (peers.isEmpty()) {
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(28.dp),
+                                .padding(24.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    imageVector = Icons.Default.Devices,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(36.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    when {
-                                        status is EngineStatus.Connected -> "No Snowdrop devices online."
-                                        status is EngineStatus.NeedsAuth -> "Sign in with Tailscale above to discover devices."
-                                        else -> "Connecting to Tailnet..."
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            Text(
+                                when {
+                                    status is EngineStatus.Connected -> "No devices online."
+                                    status is EngineStatus.NeedsAuth -> "Sign in to see devices."
+                                    else -> "Connecting..."
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -404,7 +318,7 @@ fun SnowdropScreen() {
                     PeerCard(
                         peer = peer,
                         hasStagedFile = stagedFile != null,
-                        onSendStagedFile = {
+                        onSend = {
                             stagedFile?.let { file ->
                                 peer.primaryIP?.let { ip ->
                                     TransferService.start(context)
@@ -412,15 +326,12 @@ fun SnowdropScreen() {
                                     stagedFile = null
                                 }
                             }
-                        },
-                        onPickAndSend = {
-                            filePickerLauncher.launch("*/*")
                         }
                     )
                 }
             }
 
-            // Section 5: Recent Transfers
+            // Recent Transfers
             if (recentTransfers.isNotEmpty()) {
                 item {
                     Text(
@@ -436,7 +347,7 @@ fun SnowdropScreen() {
             }
 
             item {
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
@@ -478,30 +389,21 @@ fun StatusPill(status: EngineStatus) {
 fun ActiveTransferCard(transfer: TransferItem, onCancel: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        shape = RoundedCornerShape(12.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(if (transfer.isIncoming) Color(0xFF4CAF50).copy(alpha = 0.15f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (transfer.isIncoming) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
-                        contentDescription = null,
-                        tint = if (transfer.isIncoming) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
+                Icon(
+                    imageVector = if (transfer.isIncoming) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                    contentDescription = null,
+                    tint = if (transfer.isIncoming) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(transfer.fileName, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        if (transfer.isIncoming) "Receiving from ${transfer.peerName}" else "Sending to ${transfer.peerName}",
+                        if (transfer.isIncoming) "From ${transfer.peerName}" else "To ${transfer.peerName}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -510,15 +412,15 @@ fun ActiveTransferCard(transfer: TransferItem, onCancel: () -> Unit) {
                     Icon(Icons.Default.Close, contentDescription = "Cancel", tint = MaterialTheme.colorScheme.error)
                 }
             }
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             LinearProgressIndicator(
-                progress = transfer.progress,
+                progress = { transfer.progress },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp))
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("${(transfer.progress * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 val transferredMb = transfer.bytesTransferred.toDouble() / (1024 * 1024)
@@ -537,42 +439,30 @@ fun ActiveTransferCard(transfer: TransferItem, onCancel: () -> Unit) {
 fun PeerCard(
     peer: PeerItem,
     hasStagedFile: Boolean,
-    onSendStagedFile: () -> Unit,
-    onPickAndSend: () -> Unit
+    onSend: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (peer.online) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                        else Color.Gray.copy(alpha = 0.1f)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = when (peer.os.lowercase()) {
-                        "darwin", "macos", "ios" -> Icons.Default.Laptop
-                        "android" -> Icons.Default.Smartphone
-                        else -> Icons.Default.Computer
-                    },
-                    contentDescription = peer.os,
-                    modifier = Modifier.size(24.dp),
-                    tint = if (peer.online) MaterialTheme.colorScheme.primary else Color.Gray
-                )
-            }
-            Spacer(modifier = Modifier.width(14.dp))
+            Icon(
+                imageVector = when (peer.os.lowercase()) {
+                    "darwin", "macos", "ios" -> Icons.Default.Laptop
+                    "android" -> Icons.Default.Smartphone
+                    else -> Icons.Default.Computer
+                },
+                contentDescription = null,
+                modifier = Modifier.size(26.dp),
+                tint = if (peer.online) MaterialTheme.colorScheme.primary else Color.Gray
+            )
+            Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     peer.displayName,
@@ -592,41 +482,20 @@ fun PeerCard(
                     Spacer(modifier = Modifier.width(5.dp))
                     Text(
                         if (peer.online) "Connected" else "Offline",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.bodySmall,
                         color = if (peer.online) Color(0xFF4CAF50) else Color.Gray,
                         fontWeight = FontWeight.Medium
                     )
-                    peer.primaryIP?.let { ip ->
-                        Text(
-                            " • $ip",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    }
                 }
             }
-            Spacer(modifier = Modifier.width(8.dp))
-
-            if (hasStagedFile) {
-                Button(
-                    onClick = onSendStagedFile,
-                    enabled = peer.online,
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
-                ) {
-                    Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Send", fontWeight = FontWeight.Bold)
-                }
-            } else {
-                OutlinedButton(
-                    onClick = onPickAndSend,
-                    enabled = peer.online,
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
-                ) {
-                    Text("Select & Send")
-                }
+            Spacer(modifier = Modifier.width(10.dp))
+            Button(
+                onClick = onSend,
+                enabled = peer.online && hasStagedFile,
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+            ) {
+                Text("Send", fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -636,36 +505,29 @@ fun PeerCard(
 fun RecentTransferRow(transfer: TransferItem) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f))
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 imageVector = if (transfer.isSuccess) Icons.Default.CheckCircle else Icons.Default.Cancel,
                 contentDescription = null,
                 tint = if (transfer.isSuccess) Color(0xFF4CAF50) else Color(0xFFE53935),
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(18.dp)
             )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    transfer.fileName,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    if (transfer.isIncoming) "Received" else "Sent",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                transfer.fileName,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
             Text(
                 if (transfer.isSuccess) "Done" else "Failed",
                 style = MaterialTheme.typography.labelSmall,

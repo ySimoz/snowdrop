@@ -340,30 +340,18 @@ public struct MenuBarView: View {
 
             Spacer()
 
-            if let staged = vm.stagedFileURL {
-                Button(action: {
+            Button(action: {
+                if let staged = vm.stagedFileURL {
                     engine.sendFile(to: peer, fileURL: staged)
                     vm.clearStagedFile()
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "paperplane.fill")
-                            .font(.system(size: 10))
-                        Text("Send")
-                            .font(.system(size: 11, weight: .bold))
-                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(!peer.online || engine.activeTransfer != nil)
-            } else {
-                Button(action: { promptFileSelection(for: peer) }) {
-                    Text("Select & Send")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(!peer.online || engine.activeTransfer != nil)
+            }) {
+                Text("Send")
+                    .font(.system(size: 11, weight: .semibold))
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(!peer.online || engine.activeTransfer != nil || vm.stagedFileURL == nil)
         }
         .padding(8)
         .background(Color(NSColor.controlBackgroundColor))
