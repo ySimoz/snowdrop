@@ -62,7 +62,7 @@ func NewEngine(cfg *EngineConfig) (*Engine, error) {
 	}, nil
 }
 
-// Start begins tsnet operation and HTTP service listener
+// Start begins tsnet operation and HTTP service listener asynchronously
 func (e *Engine) Start() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -90,36 +90,40 @@ func (e *Engine) Start() error {
 		},
 	}
 
-	if err := e.tsServer.Start(); err != nil {
-		e.updateStatus(StatusError, err.Error())
-		return fmt.Errorf("failed starting tsnet server: %w", err)
-	}
-
-	ln, err := e.tsServer.Listen("tcp", fmt.Sprintf(":%d", e.config.Port))
-	if err != nil {
-		_ = e.tsServer.Close()
-		e.updateStatus(StatusError, err.Error())
-		return fmt.Errorf("failed listening on tsnet port %d: %w", e.config.Port, err)
-	}
-	e.listener = ln
-
-	e.httpSrv = &http.Server{
-		Handler:      e.transfers.Router(serverHostname),
-		ReadTimeout:  10 * time.Minute,
-		WriteTimeout: 10 * time.Minute,
-	}
-
 	e.wg.Add(2)
-	go e.serveHTTP()
+	go e.runServer(serverHostname)
 	go e.monitorStatus()
 
 	e.updateStatus(StatusConnecting, "starting")
 	return nil
 }
 
-func (e *Engine) serveHTTP() {
+func (e *Engine) runServer(serverHostname string) {
 	defer e.wg.Done()
-	if err := e.httpSrv.Serve(e.listener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+
+	if err := e.tsServer.Start(); err != nil {
+		e.updateStatus(StatusError, err.Error())
+		return
+	}
+
+	ln, err := e.tsServer.Listen("tcp", fmt.Sprintf(":%d", e.config.Port))
+	if err != nil {
+		_ = e.tsServer.Close()
+		e.updateStatus(StatusError, err.Error())
+		return
+	}
+
+	e.mu.Lock()
+	e.listener = ln
+	e.httpSrv = &http.Server{
+		Handler:      e.transfers.Router(serverHostname),
+		ReadTimeout:  10 * time.Minute,
+		WriteTimeout: 10 * time.Minute,
+	}
+	srv := e.httpSrv
+	e.mu.Unlock()
+
+	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 		e.updateStatus(StatusError, fmt.Sprintf("http server error: %v", err))
 	}
 }

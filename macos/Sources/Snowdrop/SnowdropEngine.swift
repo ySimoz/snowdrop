@@ -30,45 +30,47 @@ public final class SnowdropEngine: ObservableObject {
 
     public func start() {
         guard !isEngineRunning else { return }
-
-        RegisterCallbacks(
-            { status, msg in
-                let message = msg != nil ? String(cString: msg!) : ""
-                SnowdropEngine.shared.handleStatusChange(status: Int(status), message: message)
-            },
-            { url in
-                let authURL = url != nil ? String(cString: url!) : ""
-                SnowdropEngine.shared.handleAuthRequired(url: authURL)
-            },
-            { json in
-                let jsonStr = json != nil ? String(cString: json!) : ""
-                SnowdropEngine.shared.handlePeersUpdated(json: jsonStr)
-            },
-            { id, current, total in
-                let transferID = id != nil ? String(cString: id!) : ""
-                SnowdropEngine.shared.handleProgress(transferID: transferID, current: current, total: total)
-            },
-            { id, success, err in
-                let transferID = id != nil ? String(cString: id!) : ""
-                let errorMsg = err != nil ? String(cString: err!) : ""
-                SnowdropEngine.shared.handleTransferComplete(transferID: transferID, success: success, errorMsg: errorMsg)
-            }
-        )
+        isEngineRunning = true
 
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
         let dataDir = appSupport.appendingPathComponent("Snowdrop").path
         let dlDir = downloadDirectory.path
+        let devName = deviceName
 
-        let code = StartEngine(dataDir, dlDir, deviceName)
-        if code == 0 {
-            isEngineRunning = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            RegisterCallbacks(
+                { status, msg in
+                    let message = msg != nil ? String(cString: msg!) : ""
+                    SnowdropEngine.shared.handleStatusChange(status: Int(status), message: message)
+                },
+                { url in
+                    let authURL = url != nil ? String(cString: url!) : ""
+                    SnowdropEngine.shared.handleAuthRequired(url: authURL)
+                },
+                { json in
+                    let jsonStr = json != nil ? String(cString: json!) : ""
+                    SnowdropEngine.shared.handlePeersUpdated(json: jsonStr)
+                },
+                { id, current, total in
+                    let transferID = id != nil ? String(cString: id!) : ""
+                    SnowdropEngine.shared.handleProgress(transferID: transferID, current: current, total: total)
+                },
+                { id, success, err in
+                    let transferID = id != nil ? String(cString: id!) : ""
+                    let errorMsg = err != nil ? String(cString: err!) : ""
+                    SnowdropEngine.shared.handleTransferComplete(transferID: transferID, success: success, errorMsg: errorMsg)
+                }
+            )
+
+            let code = StartEngine(dataDir, dlDir, devName)
             DispatchQueue.main.async {
-                self.status = .connecting
-            }
-        } else {
-            DispatchQueue.main.async {
-                self.status = .error(message: "Failed to initialize engine (code \(code))")
+                if code == 0 {
+                    self.status = .connecting
+                } else {
+                    self.isEngineRunning = false
+                    self.status = .error(message: "Failed to initialize engine (code \(code))")
+                }
             }
         }
     }
