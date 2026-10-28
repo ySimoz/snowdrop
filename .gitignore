@@ -7,6 +7,8 @@
 
 # macOS
 .DS_Store
+macos/.build/
+macos/dist/
 
 # Go
 bin/
