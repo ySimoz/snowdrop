@@ -1,0 +1,29 @@
+# Binaries & Archives
+*.a
+*.so
+*.dylib
+*.aar
+*.jar
+
+# macOS
+.DS_Store
+
+# Go
+bin/
+dist/
+vendor/
+
+# Android
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.apk
+*.aab
+
+# Xcode / Apple
+*.xcworkspace/xcuserdata/
+xcuserdata/
+DerivedData/
+*.xcuserstate
