@@ -12,7 +12,7 @@ public final class MenuBarViewModel: ObservableObject {
 }
 
 public struct MenuBarView: View {
-    @ObservedObject var engine = MeshDropEngine.shared
+    @ObservedObject var engine = SnowdropEngine.shared
     @ObservedObject var vm = MenuBarViewModel()
 
     public init() {}
@@ -74,8 +74,12 @@ public struct MenuBarView: View {
 
     private var headerView: some View {
         HStack {
+            Image(systemName: "camera.macro")
+                .foregroundColor(.accentColor)
+                .font(.system(size: 16))
+
             VStack(alignment: .leading, spacing: 2) {
-                Text("MeshDrop")
+                Text("Snowdrop")
                     .font(.system(size: 14, weight: .bold))
 
                 Text(engine.deviceName)
@@ -288,7 +292,7 @@ struct PeerDropSheet: View {
     let peer: PeerItem
     let fileURL: URL?
     let onDismiss: () -> Void
-    @ObservedObject var engine = MeshDropEngine.shared
+    @ObservedObject var engine = SnowdropEngine.shared
 
     var body: some View {
         VStack(spacing: 12) {
@@ -327,7 +331,7 @@ struct PeerDropSheet: View {
 }
 
 struct SettingsPopoverView: View {
-    @ObservedObject var engine: MeshDropEngine
+    @ObservedObject var engine: SnowdropEngine
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

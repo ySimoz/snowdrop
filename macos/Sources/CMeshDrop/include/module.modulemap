@@ -1,4 +1,0 @@
-module CMeshDrop [system] {
-    header "meshdrop.h"
-    export *
-}

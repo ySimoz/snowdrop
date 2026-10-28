@@ -2,10 +2,10 @@ import Foundation
 import Combine
 import AppKit
 import UserNotifications
-import CMeshDrop
+import CSnowdrop
 
-public final class MeshDropEngine: ObservableObject {
-    public static let shared = MeshDropEngine()
+public final class SnowdropEngine: ObservableObject {
+    public static let shared = SnowdropEngine()
 
     @Published public private(set) var status: EngineStatus = .disconnected
     @Published public private(set) var peers: [PeerItem] = []
@@ -34,30 +34,30 @@ public final class MeshDropEngine: ObservableObject {
         RegisterCallbacks(
             { status, msg in
                 let message = msg != nil ? String(cString: msg!) : ""
-                MeshDropEngine.shared.handleStatusChange(status: Int(status), message: message)
+                SnowdropEngine.shared.handleStatusChange(status: Int(status), message: message)
             },
             { url in
                 let authURL = url != nil ? String(cString: url!) : ""
-                MeshDropEngine.shared.handleAuthRequired(url: authURL)
+                SnowdropEngine.shared.handleAuthRequired(url: authURL)
             },
             { json in
                 let jsonStr = json != nil ? String(cString: json!) : ""
-                MeshDropEngine.shared.handlePeersUpdated(json: jsonStr)
+                SnowdropEngine.shared.handlePeersUpdated(json: jsonStr)
             },
             { id, current, total in
                 let transferID = id != nil ? String(cString: id!) : ""
-                MeshDropEngine.shared.handleProgress(transferID: transferID, current: current, total: total)
+                SnowdropEngine.shared.handleProgress(transferID: transferID, current: current, total: total)
             },
             { id, success, err in
                 let transferID = id != nil ? String(cString: id!) : ""
                 let errorMsg = err != nil ? String(cString: err!) : ""
-                MeshDropEngine.shared.handleTransferComplete(transferID: transferID, success: success, errorMsg: errorMsg)
+                SnowdropEngine.shared.handleTransferComplete(transferID: transferID, success: success, errorMsg: errorMsg)
             }
         )
 
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        let dataDir = appSupport.appendingPathComponent("MeshDrop").path
+        let dataDir = appSupport.appendingPathComponent("Snowdrop").path
         let dlDir = downloadDirectory.path
 
         let code = StartEngine(dataDir, dlDir, deviceName)
@@ -182,7 +182,6 @@ public final class MeshDropEngine: ObservableObject {
     func handleProgress(transferID: String, current: Int64, total: Int64) {
         DispatchQueue.main.async {
             guard var currentTransfer = self.activeTransfer, currentTransfer.id == transferID else {
-                // Incoming transfer not yet created in UI
                 let newTransfer = TransferItem(
                     id: transferID,
                     fileName: "Receiving File...",

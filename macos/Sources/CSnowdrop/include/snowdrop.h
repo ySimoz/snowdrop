@@ -1,5 +1,5 @@
-#ifndef MESHDROP_H
-#define MESHDROP_H
+#ifndef SNOWDROP_H
+#define SNOWDROP_H
 
 #include <stdint.h>
 #include <stdbool.h>

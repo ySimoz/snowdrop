@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Snowdrop" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.Snowdrop.Translucent" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.Dialog</item>
+    </style>
+</resources>

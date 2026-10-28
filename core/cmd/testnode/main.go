@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/username/meshdrop/core"
+	"github.com/username/snowdrop/core"
 )
 
 func main() {
@@ -32,7 +32,7 @@ func main() {
 
 	baseDir := *dataDir
 	if baseDir == "" {
-		baseDir = filepath.Join(os.TempDir(), "meshdrop-testnode", *name)
+		baseDir = filepath.Join(os.TempDir(), "snowdrop-testnode", *name)
 	}
 	downloadDir := *dlDir
 	if downloadDir == "" {
@@ -98,7 +98,7 @@ func main() {
 
 func runLoopbackSimulation() {
 	log.Println("Starting Loopback Transfer Simulation...")
-	tempDir, err := os.MkdirTemp("", "meshdrop-sim-*")
+	tempDir, err := os.MkdirTemp("", "snowdrop-sim-*")
 	if err != nil {
 		log.Fatalf("temp dir error: %v", err)
 	}

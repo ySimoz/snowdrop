@@ -34,7 +34,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/username/meshdrop/core"
+	"github.com/username/snowdrop/core"
 )
 
 var (

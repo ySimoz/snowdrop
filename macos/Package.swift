@@ -2,27 +2,27 @@
 import PackageDescription
 
 let package = Package(
-    name: "MeshDrop",
+    name: "Snowdrop",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "MeshDrop", targets: ["MeshDrop"])
+        .executable(name: "Snowdrop", targets: ["Snowdrop"])
     ],
     targets: [
         .target(
-            name: "CMeshDrop",
-            path: "Sources/CMeshDrop",
+            name: "CSnowdrop",
+            path: "Sources/CSnowdrop",
             publicHeadersPath: "include"
         ),
         .executableTarget(
-            name: "MeshDrop",
-            dependencies: ["CMeshDrop"],
-            path: "Sources/MeshDrop",
+            name: "Snowdrop",
+            dependencies: ["CSnowdrop"],
+            path: "Sources/Snowdrop",
             linkerSettings: [
                 .unsafeFlags([
                     "-L", "\(Context.packageDirectory)/Frameworks",
-                    "-lmeshdrop"
+                    "-lsnowdrop"
                 ])
             ]
         )

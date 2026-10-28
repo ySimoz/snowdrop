@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Snowdrop</string>
+    <string name="sign_in_with_tailscale">Sign in with Tailscale</string>
+    <string name="available_devices">Available Devices</string>
+    <string name="recent_transfers">Recent Transfers</string>
+    <string name="tailnet_online">Tailnet Online</string>
+    <string name="tailnet_offline">Tailnet Offline</string>
+</resources>

@@ -225,7 +225,7 @@ func TestTransferSendHelper(t *testing.T) {
 
 	// Create temp file to send
 	srcFile := filepath.Join(t.TempDir(), "document.txt")
-	content := []byte("meshdrop transmission payload")
+	content := []byte("snowdrop transmission payload")
 	if err := os.WriteFile(srcFile, content, 0644); err != nil {
 		t.Fatal(err)
 	}

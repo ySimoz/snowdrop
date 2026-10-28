@@ -1,4 +1,4 @@
-module github.com/username/meshdrop/core
+module github.com/username/snowdrop/core
 
 go 1.27.3
 

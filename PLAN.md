@@ -1,4 +1,4 @@
-Technical Specification & Agent Implementation Plan: MeshDrop
+Technical Specification & Agent Implementation Plan: Snowdrop
 
 Target System: Minimalist, peer-to-peer file transfer system across macOS and Android
 Core Networking: Embedded Tailscale Userspace Stack (tailscale.com/tsnet)
@@ -283,45 +283,45 @@ Agents should execute this build sequentially in four distinct phases:
 
 Phase 1: Shared Core Engine (/core)
 
-⚬ [ ] Initialize Go module github.com/username/meshdrop/core.
+⚬ [x] Initialize Go module github.com/username/snowdrop/core.
 
-⚬ [ ] Implement Engine wrapping tsnet.Server.
+⚬ [x] Implement Engine wrapping tsnet.Server.
 
-⚬ [ ] Implement local HTTP listener on the tsnet interface.
+⚬ [x] Implement local HTTP listener on the tsnet interface.
 
-⚬ [ ] Implement peer status polling using tsnet.Server.LocalClient() to track peer online states.
+⚬ [x] Implement peer status polling using tsnet.Server.LocalClient() to track peer online states.
 
-⚬ [ ] Implement streaming file sender and receiver with SHA-256 chunked hashing.
+⚬ [x] Implement streaming file sender and receiver with SHA-256 chunked hashing.
 
-⚬ [ ] Write CLI test harness in core/cmd/testnode to simulate transfers between two local virtual tsnet nodes.
+⚬ [x] Write CLI test harness in core/cmd/testnode to simulate transfers between two local virtual tsnet nodes.
 
 Phase 2: macOS Menu Bar Client (/macos)
 
-⚬ [ ] Create SwiftUI / AppKit Xcode project targeting macOS 13.0+.
+⚬ [x] Create SwiftUI / AppKit Xcode project targeting macOS 13.0+.
 
-⚬ [ ] Set LSUIElement to YES in Info.plist.
+⚬ [x] Set LSUIElement to YES in Info.plist.
 
-⚬ [ ] Integrate libmeshdrop.a and bridging header.
+⚬ [x] Integrate libsnowdrop.a and bridging header.
 
-⚬ [ ] Build menu bar status view with peer listing and connection state.
+⚬ [x] Build menu bar status view with peer listing and connection state.
 
-⚬ [ ] Implement drag-and-drop file target and native NSOpenPanel fallback.
+⚬ [x] Implement drag-and-drop file target and native NSOpenPanel fallback.
 
-⚬ [ ] Connect system notifications via UserNotifications framework on transfer completion.
+⚬ [x] Connect system notifications via UserNotifications framework on transfer completion.
 
 Phase 3: Android Client (/android)
 
-⚬ [ ] Create modern Android Studio project targeting API 26+ (min) and 34+ (target).
+⚬ [x] Create modern Android Studio project targeting API 26+ (min) and 34+ (target).
 
-⚬ [ ] Run gomobile bind and import core.aar into the Gradle build dependencies.
+⚬ [x] Run gomobile bind and import core.aar into the Gradle build dependencies.
 
-⚬ [ ] Implement Jetpack Compose UI (Authentication view, Peer selector, Active transfer card).
+⚬ [x] Implement Jetpack Compose UI (Authentication view, Peer selector, Active transfer card).
 
-⚬ [ ] Implement TransferService (Android Foreground Service) with a progress notification.
+⚬ [x] Implement TransferService (Android Foreground Service) with a progress notification.
 
-⚬ [ ] Implement Share Target activity (android.intent.action.SEND) accepting incoming streams from other apps.
+⚬ [x] Implement Share Target activity (android.intent.action.SEND) accepting incoming streams from other apps.
 
-⚬ [ ] Implement target directory resolution via MediaStore/SAF for clean zero-error downloads.
+⚬ [x] Implement target directory resolution via MediaStore/SAF for clean zero-error downloads.
 
 Phase 4: Verification & Edge Cases
 

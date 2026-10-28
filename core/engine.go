@@ -17,7 +17,7 @@ import (
 	"tailscale.com/tsnet"
 )
 
-// Engine represents an active MeshDrop node powered by tsnet
+// Engine represents an active Snowdrop node powered by tsnet
 type Engine struct {
 	config    *EngineConfig
 	tsServer  *tsnet.Server
@@ -32,7 +32,7 @@ type Engine struct {
 	lastPeers string
 }
 
-// NewEngine initializes a MeshDrop engine instance
+// NewEngine initializes a Snowdrop engine instance
 func NewEngine(cfg *EngineConfig) (*Engine, error) {
 	if cfg == nil {
 		return nil, errors.New("nil engine config")
@@ -75,7 +75,7 @@ func (e *Engine) Start() error {
 	}
 
 	sanitizedName := sanitizeHostname(e.config.DeviceName)
-	serverHostname := fmt.Sprintf("meshdrop-%s", sanitizedName)
+	serverHostname := fmt.Sprintf("snowdrop-%s", sanitizedName)
 
 	e.tsServer = &tsnet.Server{
 		Dir:       e.config.DataDir,
