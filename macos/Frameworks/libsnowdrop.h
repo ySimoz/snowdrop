@@ -131,6 +131,7 @@ extern _Bool ResolveTransferApproval(char* transferID, int decision);
 extern char* GetTrustedPeers(void);
 extern _Bool RevokeTrusted(char* nodeID);
 extern void SetApprovalConfig(_Bool requireApproval, _Bool autoAcceptTrusted);
+extern _Bool SnowdropSignOut(void);
 
 #ifdef __cplusplus
 }

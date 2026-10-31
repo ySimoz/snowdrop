@@ -829,6 +829,30 @@ struct SettingsPopoverView: View {
                 .font(.system(size: 11))
                 .controlSize(.small)
             }
+
+            Divider()
+                .background(Color.frostSlate700)
+
+            // 5. Account & Session
+            VStack(alignment: .leading, spacing: 4) {
+                Text("ACCOUNT")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.frostSlate400)
+
+                Button(role: .destructive) {
+                    vm.showingSettings = false
+                    engine.signOut()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                        Text("Sign Out & Unlink")
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.frostRose)
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 2)
+            }
         }
         .padding(14)
         .frame(width: 270)

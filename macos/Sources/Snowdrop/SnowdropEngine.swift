@@ -593,6 +593,16 @@ public final class SnowdropEngine: ObservableObject {
         refreshTrustedPeers()
     }
 
+    public func signOut() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = SnowdropSignOut()
+            DispatchQueue.main.async {
+                self.peers = []
+                self.status = .needsAuth(url: "")
+            }
+        }
+    }
+
     private func setupNotifications() {
         let acceptAction = UNNotificationAction(identifier: "ACTION_ACCEPT", title: "Accept", options: [.foreground])
         let trustAction = UNNotificationAction(identifier: "ACTION_TRUST", title: "Always Trust", options: [])

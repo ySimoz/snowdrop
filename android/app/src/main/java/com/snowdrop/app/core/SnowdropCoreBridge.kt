@@ -720,6 +720,14 @@ object SnowdropCoreBridge : AndroidCallback {
         }
     }
 
+    fun signOut() {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            Core.signOutAndroid()
+            _peers.value = emptyList()
+            _status.value = EngineStatus.NeedsAuth("")
+        }
+    }
+
     private fun handleIncomingReceivedFile(context: Context, filePath: String): Uri? {
         val sourceFile = File(filePath)
         if (!sourceFile.exists()) return null

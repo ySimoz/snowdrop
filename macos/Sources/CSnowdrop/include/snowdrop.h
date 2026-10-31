@@ -33,5 +33,6 @@ bool ResolveTransferApproval(const char* transferID, int decision);
 char* GetTrustedPeers(void);
 bool RevokeTrusted(const char* nodeID);
 void SetApprovalConfig(bool requireApproval, bool autoAcceptTrusted);
+bool SnowdropSignOut(void);
 
 #endif

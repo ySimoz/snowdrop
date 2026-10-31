@@ -345,4 +345,16 @@ func SetApprovalConfig(requireApproval C.bool, autoAcceptTrusted C.bool) {
 	}
 }
 
+//export SnowdropSignOut
+func SnowdropSignOut() C.bool {
+	darwinMu.Lock()
+	eng := activeEngine
+	darwinMu.Unlock()
+
+	if eng != nil {
+		return C.bool(eng.SignOut() == nil)
+	}
+	return false
+}
+
 func main() {}

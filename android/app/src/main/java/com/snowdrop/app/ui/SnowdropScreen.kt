@@ -993,6 +993,38 @@ fun SnowdropScreen() {
                         Text("Restart Network Stack", fontSize = 12.sp)
                     }
                 }
+
+                Divider(color = FrostSlate700.copy(alpha = 0.5f), thickness = 0.8.dp)
+
+                // 5. Account & Session
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "ACCOUNT",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = FrostSlate400,
+                        fontWeight = FontWeight.Bold
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            SnowdropCoreBridge.signOut()
+                            showSettingsSheet = false
+                            Toast.makeText(context, "Signed out and unlinked", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, FrostRose.copy(alpha = 0.5f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = FrostRose)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ExitToApp,
+                            contentDescription = null,
+                            tint = FrostRose,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Sign Out & Unlink Device", fontSize = 12.sp, color = FrostRose)
+                    }
+                }
             }
         }
     }

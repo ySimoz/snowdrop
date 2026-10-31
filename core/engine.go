@@ -412,6 +412,35 @@ func (e *Engine) SetApprovalConfig(requireApproval, autoAcceptTrusted bool) {
 	e.mu.Unlock()
 }
 
+// SignOut logs out the current node from Tailscale and requests a fresh login URL
+func (e *Engine) SignOut() error {
+	e.mu.Lock()
+	tsSrv := e.tsServer
+	e.mu.Unlock()
+
+	if tsSrv == nil {
+		return fmt.Errorf("engine not started")
+	}
+
+	lc, err := tsSrv.LocalClient()
+	if err != nil {
+		return fmt.Errorf("failed to get local client: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := lc.Logout(ctx); err != nil {
+		return fmt.Errorf("failed to logout: %w", err)
+	}
+
+	// Request new interactive login so user can re-authenticate
+	_ = lc.StartLoginInteractive(ctx)
+
+	e.updateStatus(StatusNeedsAuth, "LoggedOut")
+	return nil
+}
+
 func sanitizeHostname(name string) string {
 	reg := regexp.MustCompile("[^a-zA-Z0-9]+")
 	sanitized := reg.ReplaceAllString(name, "-")

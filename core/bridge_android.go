@@ -348,3 +348,15 @@ func SetAndroidApprovalConfig(requireApproval bool, autoAcceptTrusted bool) {
 		eng.SetApprovalConfig(requireApproval, autoAcceptTrusted)
 	}
 }
+
+// SignOutAndroid logs out the Android engine and requests a new login URL
+func SignOutAndroid() bool {
+	androidMu.Lock()
+	eng := androidEngine
+	androidMu.Unlock()
+
+	if eng != nil {
+		return eng.SignOut() == nil
+	}
+	return false
+}
