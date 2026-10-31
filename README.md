@@ -46,7 +46,7 @@
 ## Quick Start
 
 1. **Download**: Grab `Snowdrop-v0.10.0-macos.zip` for Mac and `Snowdrop-v0.10.0-android.apk` for Android from [Releases](https://github.com/ySimoz/snowdrop/releases/latest).
-2. **Sign In**: Open Snowdrop on both devices and authenticate with your Tailscale identity.
+2. **One-Time Sign In**: Open Snowdrop on both devices. On first launch, tap **Sign In** to link them with your account (Google, Apple, or GitHub). No separate VPN app or setup needed; credentials persist automatically across launches.
 3. **Send**: Pick your files, choose your target device, and tap **Send**.
 
 ---
