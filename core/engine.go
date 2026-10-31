@@ -298,6 +298,7 @@ func (e *Engine) syncPeers(st any) {
 	if len(peerList) == 0 {
 		peerList = otherPeers
 	}
+	peerList = deduplicatePeers(peerList)
 	if peerList == nil {
 		peerList = make([]PeerInfo, 0)
 	}
@@ -487,4 +488,43 @@ func (e *Engine) fetchPeerInfo(ip string) {
 			go e.syncPeers(nil)
 		}
 	}
+}
+
+// baseDeviceKey normalizes hostnames by stripping trailing Tailscale duplicate indices like "-1", "-2"
+func baseDeviceKey(name string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	for i := len(lower) - 1; i >= 0; i-- {
+		if lower[i] >= '0' && lower[i] <= '9' {
+			continue
+		}
+		if lower[i] == '-' && i < len(lower)-1 {
+			return lower[:i]
+		}
+		break
+	}
+	return lower
+}
+
+// deduplicatePeers suppresses stale offline duplicates when an active online node with the same base name exists
+func deduplicatePeers(peers []PeerInfo) []PeerInfo {
+	if len(peers) <= 1 {
+		return peers
+	}
+	onlineBases := make(map[string]bool)
+	for _, p := range peers {
+		if p.Online {
+			onlineBases[baseDeviceKey(p.HostName)] = true
+		}
+	}
+
+	result := make([]PeerInfo, 0, len(peers))
+	for _, p := range peers {
+		base := baseDeviceKey(p.HostName)
+		// If this peer is offline and there's an online peer with the same base name, suppress it
+		if !p.Online && onlineBases[base] {
+			continue
+		}
+		result = append(result, p)
+	}
+	return result
 }
