@@ -21,12 +21,40 @@ const (
 	HeaderFileSize     = "X-File-Size"
 	HeaderFileSHA256   = "X-File-SHA256"
 	HeaderSenderName   = "X-Sender-Name"
+	HeaderSenderNodeID = "X-Sender-Node-ID"
+	HeaderBatchID      = "X-Snowdrop-Batch-ID"
+	HeaderFileID       = "X-Snowdrop-File-ID"
 )
+
+// Transfer approval decisions
+const (
+	ApprovalDecisionAccept      = 1
+	ApprovalDecisionAlwaysTrust = 2
+	ApprovalDecisionDecline     = 3
+)
+
+// BatchFileItem describes an individual file in a batch manifest
+type BatchFileItem struct {
+	FileID   string `json:"fileId"`
+	FileName string `json:"fileName"`
+	FileSize int64  `json:"fileSize"`
+	SHA256   string `json:"sha256"`
+}
+
+// BatchManifest describes a collection of files sent together
+type BatchManifest struct {
+	BatchID      string          `json:"batchId"`
+	SenderNodeID string          `json:"senderNodeId,omitempty"`
+	SenderName   string          `json:"senderName"`
+	TotalBytes   int64           `json:"totalBytes"`
+	Files        []BatchFileItem `json:"files"`
+}
 
 // PeerInfo describes a reachable peer on the Tailnet
 type PeerInfo struct {
 	ID          string   `json:"id"`
 	HostName    string   `json:"hostName"`
+	DisplayName string   `json:"displayName"`
 	DNSName     string   `json:"dnsName"`
 	OS          string   `json:"os"`
 	IPAddresses []string `json:"ipAddresses"`
@@ -35,16 +63,21 @@ type PeerInfo struct {
 
 // EngineConfig holds configuration and callbacks for the core engine
 type EngineConfig struct {
-	DataDir            string
-	DownloadDir        string
-	DeviceName         string
-	Port               int
-	OnStatusChange     func(status int, message string)
-	OnAuthRequired     func(authURL string)
-	OnPeersUpdated     func(peersJSON string)
-	OnIncomingRequest  func(transferID string, senderName string, fileName string, sizeBytes int64) bool
-	OnProgress         func(transferID string, bytesTransferred int64, totalBytes int64)
-	OnTransferComplete func(transferID string, success bool, errorMsg string)
+	DataDir             string
+	DownloadDir         string
+	DeviceName          string
+	Port                int
+	OnStatusChange      func(status int, message string)
+	OnAuthRequired      func(authURL string)
+	OnPeersUpdated      func(peersJSON string)
+	OnIncomingRequest   func(transferID string, senderName string, fileName string, sizeBytes int64) bool
+	OnIncomingApproval  func(transferID string, senderNodeID string, senderName string, fileName string, sizeBytes int64)
+	OnProgress          func(transferID string, bytesTransferred int64, totalBytes int64)
+	OnTransferComplete  func(transferID string, success bool, errorMsg string)
+	OnBatchProgress     func(batchID string, fileIndex int, totalFiles int, fileName string, fileBytes int64, fileTotal int64, batchBytes int64, batchTotal int64)
+	OnBatchFileReceived func(batchID string, fileIndex int, totalFiles int, fileName string, filePath string)
+	RequireApproval     bool
+	AutoAcceptTrusted   bool
 }
 
 // NodeInfo represents the payload for GET /v1/info

@@ -1,0 +1,30 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.13"
+        android:scaleY="0.13"
+        android:translateX="20.7"
+        android:translateY="20.7">
+        <group android:translateY="24">
+            <!-- Stem and outer petals (unified) -->
+            <path
+                android:fillColor="#38BDF8"
+                android:pathData="M 245,365 C 245,320 242,285 225,255 C 205,220 138,180 142,120 C 145,94 175,102 192,122 C 218,154 238,230 252,278 C 253,282 259,282 260,278 C 274,230 294,154 320,122 C 337,102 367,94 370,120 C 374,180 307,220 287,255 C 270,285 267,320 267,365 A 11,11 0 0,1 245,365 Z" />
+            <!-- Left inner depth petal -->
+            <path
+                android:fillColor="#BAE6FD"
+                android:pathData="M 248,278 C 226,252 178,195 184,136 C 186,116 206,120 218,136 C 238,164 248,225 253,268 Z" />
+            <!-- Right inner depth petal -->
+            <path
+                android:fillColor="#BAE6FD"
+                android:pathData="M 264,278 C 286,252 334,195 328,136 C 326,116 306,120 294,136 C 274,164 264,225 259,268 Z" />
+            <!-- Center white petal -->
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M 256,52 C 286,125 288,218 256,290 C 224,218 226,125 256,52 Z" />
+        </group>
+    </group>
+</vector>

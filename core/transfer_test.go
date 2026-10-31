@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -495,6 +496,480 @@ func TestTransferLargeStreamStreaming(t *testing.T) {
 		t.Fatalf("expected file size %d, got %d", streamSize, fi.Size())
 	}
 }
+
+func TestBatchTransferSuccess(t *testing.T) {
+	dlDir := t.TempDir()
+	var (
+		mu              sync.Mutex
+		batchProgresses int
+		filesReceived   []string
+		batchCompleted  bool
+	)
+
+	cfg := &EngineConfig{
+		DeviceName:      "BatchReceiver",
+		DataDir:         t.TempDir(),
+		DownloadDir:     dlDir,
+		RequireApproval: false,
+		OnBatchProgress: func(batchID string, fileIndex int, totalFiles int, fileName string, fileBytes int64, fileTotal int64, batchBytes int64, batchTotal int64) {
+			mu.Lock()
+			batchProgresses++
+			mu.Unlock()
+		},
+		OnBatchFileReceived: func(batchID string, fileIndex int, totalFiles int, fileName string, filePath string) {
+			mu.Lock()
+			filesReceived = append(filesReceived, fileName)
+			mu.Unlock()
+		},
+		OnTransferComplete: func(transferID string, success bool, errorMsg string) {
+			mu.Lock()
+			if success {
+				batchCompleted = true
+			}
+			mu.Unlock()
+		},
+	}
+
+	tm := NewTransferManager(cfg)
+	server := httptest.NewServer(tm.Router("batch-receiver-node"))
+	defer server.Close()
+
+	tcpAddr := server.Listener.Addr().(*net.TCPAddr)
+	senderCfg := &EngineConfig{DeviceName: "BatchSender"}
+	senderTM := NewTransferManager(senderCfg)
+
+	f1Data := []byte("Hello Batch File 1")
+	f2Data := []byte("Snowdrop Batch File 2 payload bytes...")
+	f3Data := []byte("Third and final batch file")
+
+	h1 := sha256.Sum256(f1Data)
+	h2 := sha256.Sum256(f2Data)
+	h3 := sha256.Sum256(f3Data)
+
+	sources := []BatchSendSource{
+		{
+			FileID:   "f1",
+			FileName: "file1.txt",
+			FileSize: int64(len(f1Data)),
+			SHA256:   hex.EncodeToString(h1[:]),
+			Reader:   bytes.NewReader(f1Data),
+		},
+		{
+			FileID:   "f2",
+			FileName: "file2.bin",
+			FileSize: int64(len(f2Data)),
+			SHA256:   hex.EncodeToString(h2[:]),
+			Reader:   bytes.NewReader(f2Data),
+		},
+		{
+			FileID:   "f3",
+			FileName: "file3.dat",
+			FileSize: int64(len(f3Data)),
+			SHA256:   hex.EncodeToString(h3[:]),
+			Reader:   bytes.NewReader(f3Data),
+		},
+	}
+
+	batchID := "batch-test-success"
+	err := senderTM.SendBatch(
+		context.Background(),
+		server.Client(),
+		"127.0.0.1",
+		tcpAddr.Port,
+		batchID,
+		sources,
+	)
+
+	if err != nil {
+		t.Fatalf("SendBatch failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if !batchCompleted {
+		t.Fatalf("batch not marked completed")
+	}
+	if len(filesReceived) != 3 {
+		t.Fatalf("expected 3 files received, got %v", filesReceived)
+	}
+	if batchProgresses == 0 {
+		t.Fatalf("expected batch progress callbacks, got 0")
+	}
+
+	// Verify files exist in dlDir
+	for _, f := range sources {
+		p := filepath.Join(dlDir, f.FileName)
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("file %s not found on disk: %v", f.FileName, err)
+		}
+		if int64(len(data)) != f.FileSize {
+			t.Fatalf("file %s size mismatch: expected %d, got %d", f.FileName, f.FileSize, len(data))
+		}
+	}
+}
+
+func TestBatchPartialFailurePreserved(t *testing.T) {
+	dlDir := t.TempDir()
+	cfg := &EngineConfig{
+		DeviceName:      "Receiver",
+		DataDir:         t.TempDir(),
+		DownloadDir:     dlDir,
+		RequireApproval: false,
+	}
+
+	tm := NewTransferManager(cfg)
+	server := httptest.NewServer(tm.Router("receiver-node"))
+	defer server.Close()
+
+	tcpAddr := server.Listener.Addr().(*net.TCPAddr)
+	senderTM := NewTransferManager(&EngineConfig{DeviceName: "Sender"})
+
+	f1Data := []byte("Completed file that must be preserved")
+	h1 := sha256.Sum256(f1Data)
+
+	f2Data := []byte("Corrupted file with intentionally bad checksum")
+
+	sources := []BatchSendSource{
+		{
+			FileID:   "good-1",
+			FileName: "preserved.txt",
+			FileSize: int64(len(f1Data)),
+			SHA256:   hex.EncodeToString(h1[:]),
+			Reader:   bytes.NewReader(f1Data),
+		},
+		{
+			FileID:   "bad-2",
+			FileName: "corrupt.bin",
+			FileSize: int64(len(f2Data)),
+			SHA256:   "0000000000000000000000000000000000000000000000000000000000000000",
+			Reader:   bytes.NewReader(f2Data),
+		},
+	}
+
+	batchID := "batch-partial-fail"
+	err := senderTM.SendBatch(
+		context.Background(),
+		server.Client(),
+		"127.0.0.1",
+		tcpAddr.Port,
+		batchID,
+		sources,
+	)
+
+	if err == nil {
+		t.Fatalf("expected SendBatch to return error for bad hash")
+	}
+
+	// File 1 MUST be preserved on disk
+	f1Path := filepath.Join(dlDir, "preserved.txt")
+	content, err := os.ReadFile(f1Path)
+	if err != nil {
+		t.Fatalf("file 1 was NOT preserved after batch partial failure: %v", err)
+	}
+	if string(content) != string(f1Data) {
+		t.Fatalf("file 1 content mismatch")
+	}
+
+	// Corrupted file 2 must NOT be in destination
+	f2Path := filepath.Join(dlDir, "corrupt.bin")
+	if _, err := os.Stat(f2Path); !os.IsNotExist(err) {
+		t.Fatalf("corrupted file 2 should not exist in download dir")
+	}
+}
+
+func TestBatchApprovalRejection(t *testing.T) {
+	dlDir := t.TempDir()
+	cfg := &EngineConfig{
+		DeviceName:      "Receiver",
+		DataDir:         t.TempDir(),
+		DownloadDir:     dlDir,
+		RequireApproval: true,
+		OnIncomingRequest: func(transferID string, senderName string, fileName string, sizeBytes int64) bool {
+			return false // reject
+		},
+	}
+
+	tm := NewTransferManager(cfg)
+	server := httptest.NewServer(tm.Router("receiver-node"))
+	defer server.Close()
+
+	tcpAddr := server.Listener.Addr().(*net.TCPAddr)
+	senderTM := NewTransferManager(&EngineConfig{DeviceName: "Sender"})
+
+	sources := []BatchSendSource{
+		{
+			FileID:   "f1",
+			FileName: "file.txt",
+			FileSize: 10,
+			SHA256:   "abcd",
+			Reader:   bytes.NewReader([]byte("1234567890")),
+		},
+	}
+
+	err := senderTM.SendBatch(
+		context.Background(),
+		server.Client(),
+		"127.0.0.1",
+		tcpAddr.Port,
+		"batch-reject-test",
+		sources,
+	)
+
+	if err == nil {
+		t.Fatalf("expected batch rejection error, got nil")
+	}
+}
+
+func TestBatchInsufficientStorage(t *testing.T) {
+	dlDir := t.TempDir()
+	cfg := &EngineConfig{
+		DeviceName:      "Receiver",
+		DataDir:         t.TempDir(),
+		DownloadDir:     dlDir,
+		RequireApproval: false,
+	}
+
+	tm := NewTransferManager(cfg)
+	server := httptest.NewServer(tm.Router("receiver-node"))
+	defer server.Close()
+
+	// Post manifest with 1 Petabyte (exceeding disk space)
+	manifest := BatchManifest{
+		BatchID:    "huge-batch",
+		SenderName: "HugeSender",
+		TotalBytes: int64(1) << 50,
+		Files: []BatchFileItem{
+			{
+				FileID:   "huge-f",
+				FileName: "huge.bin",
+				FileSize: int64(1) << 50,
+				SHA256:   "deadbeef",
+			},
+		},
+	}
+	body, _ := json.Marshal(manifest)
+	resp, err := server.Client().Post(server.URL+"/v1/transfer/batch/request", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInsufficientStorage {
+		t.Fatalf("expected HTTP 507 Insufficient Storage, got %d", resp.StatusCode)
+	}
+}
+
+func TestPathTraversalSanitization(t *testing.T) {
+	dlDir := t.TempDir()
+	cfg := &EngineConfig{
+		DeviceName:      "Receiver",
+		DataDir:         t.TempDir(),
+		DownloadDir:     dlDir,
+		RequireApproval: false,
+	}
+
+	tm := NewTransferManager(cfg)
+	server := httptest.NewServer(tm.Router("receiver-node"))
+	defer server.Close()
+
+	payload := []byte("malicious content")
+	hash := sha256.Sum256(payload)
+	hashHex := hex.EncodeToString(hash[:])
+
+	manifest := BatchManifest{
+		BatchID:    "traversal-batch",
+		SenderName: "Attacker",
+		TotalBytes: int64(len(payload)),
+		Files: []BatchFileItem{
+			{
+				FileID:   "f-traversal",
+				FileName: "../../../../../../../../../tmp/evil_escape.txt",
+				FileSize: int64(len(payload)),
+				SHA256:   hashHex,
+			},
+		},
+	}
+
+	body, _ := json.Marshal(manifest)
+	resp, err := server.Client().Post(server.URL+"/v1/transfer/batch/request", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected OK, got %d", resp.StatusCode)
+	}
+
+	// Stream the file
+	streamReq, err := http.NewRequest(http.MethodPost, server.URL+"/v1/transfer/stream", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamReq.Header.Set(HeaderBatchID, "traversal-batch")
+	streamReq.Header.Set(HeaderFileID, "f-traversal")
+	streamResp, err := server.Client().Do(streamReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer streamResp.Body.Close()
+	if streamResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected OK, got %d", streamResp.StatusCode)
+	}
+
+	// Verify escaped path does NOT exist
+	if _, err := os.Stat("/tmp/evil_escape.txt"); !os.IsNotExist(err) {
+		_ = os.Remove("/tmp/evil_escape.txt")
+		t.Fatalf("CRITICAL: file escaped download directory!")
+	}
+
+	// Verify file was confined to dlDir as "evil_escape.txt"
+	expectedPath := filepath.Join(dlDir, "evil_escape.txt")
+	if _, err := os.Stat(expectedPath); err != nil {
+		t.Fatalf("expected file to be sanitized to %s, err: %v", expectedPath, err)
+	}
+}
+
+func TestWhoIsSpoofingPrevention(t *testing.T) {
+	dataDir := t.TempDir()
+	ts, err := NewTrustStore(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Add trusted-node with auto-accept
+	if err := ts.AddTrusted("trusted-node", "Trusted Device"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &EngineConfig{
+		DeviceName:         "Receiver",
+		DataDir:            dataDir,
+		DownloadDir:        t.TempDir(),
+		RequireApproval:    true,
+		AutoAcceptTrusted:  true,
+		OnIncomingApproval: func(id, senderNode, senderName, file string, size int64) {},
+	}
+
+	tm := NewTransferManager(cfg, ts)
+	// Wire WhoIs resolver that verifies remote caller as "untrusted-attacker"
+	tm.SetWhoIsResolver(func(ctx context.Context, remoteAddr string) (string, error) {
+		return "untrusted-attacker", nil
+	})
+
+	server := httptest.NewServer(tm.Router("receiver-node"))
+	defer server.Close()
+
+	// Attacker spoofs HeaderSenderNodeID: trusted-node
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/transfer/request", nil)
+	req.Header.Set(HeaderTransferID, "t-spoof-1")
+	req.Header.Set(HeaderFileName, "file.txt")
+	req.Header.Set(HeaderFileSize, "100")
+	req.Header.Set(HeaderFileSHA256, "abcd")
+	req.Header.Set(HeaderSenderName, "Spoofed Trusted")
+	req.Header.Set(HeaderSenderNodeID, "trusted-node") // Spoofed!
+
+	// Should NOT auto-accept (it should hang or await approval, which we immediately decline)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		tm.ResolveApproval("t-spoof-1", ApprovalDecisionDecline)
+	}()
+
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected HTTP 403 Forbidden due to spoof prevention requiring approval, got %d", resp.StatusCode)
+	}
+}
+
+func TestMaxBytesReaderManifestDoS(t *testing.T) {
+	dlDir := t.TempDir()
+	cfg := &EngineConfig{
+		DeviceName:  "Receiver",
+		DataDir:     t.TempDir(),
+		DownloadDir: dlDir,
+	}
+
+	tm := NewTransferManager(cfg)
+	server := httptest.NewServer(tm.Router("receiver-node"))
+	defer server.Close()
+
+	// 2MB oversized stream
+	oversized := bytes.Repeat([]byte(" "), 2*1024*1024)
+	resp, err := server.Client().Post(server.URL+"/v1/transfer/batch/request", "application/json", bytes.NewReader(oversized))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected HTTP 400 Bad Request for oversized JSON manifest, got %d", resp.StatusCode)
+	}
+}
+
+func FuzzSanitizeFileName(f *testing.F) {
+	seeds := []string{
+		"regular.txt",
+		"../../etc/passwd",
+		"..\\..\\windows\\system32",
+		"file\x00withnull.png",
+		"/absolute/path/file.dat",
+		"...",
+		".",
+		"",
+		"   ",
+		"CON",
+		"AUX.txt",
+		"photo 📸.jpg",
+		"long" + strings.Repeat("a", 500) + ".bin",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, input string) {
+		clean := sanitizeFileName(input)
+		if clean == "" {
+			t.Fatalf("sanitizeFileName returned empty string for %q", input)
+		}
+		if clean == "." || clean == ".." {
+			t.Fatalf("sanitizeFileName returned relative dot for %q: %q", input, clean)
+		}
+		if strings.Contains(clean, "/") || strings.Contains(clean, "\\") {
+			t.Fatalf("sanitizeFileName returned path separator for %q: %q", input, clean)
+		}
+	})
+}
+
+func FuzzResolveUniquePath(f *testing.F) {
+	seeds := []string{
+		"regular.txt",
+		"../../etc/passwd",
+		"..\\..\\system.ini",
+		"/dev/null",
+		"file\x00.txt",
+		"...",
+		"",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	dlDir := "/test/downloads"
+	f.Fuzz(func(t *testing.T, filename string) {
+		result := resolveUniquePath(dlDir, filename)
+		rel, err := filepath.Rel(dlDir, result)
+		if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
+			t.Fatalf("resolveUniquePath escaped root dir! input: %q, result: %q, rel: %q", filename, result, rel)
+		}
+	})
+}
+
+
 
 
 

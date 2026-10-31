@@ -4,6 +4,8 @@
 *.dylib
 *.aar
 *.jar
+*.apk
+*.aab
 
 # macOS
 .DS_Store
@@ -14,18 +16,31 @@ macos/dist/
 bin/
 dist/
 vendor/
+coverage.out
+*.test
 
 # Android
 .gradle/
 build/
 app/build/
+android/app/build/
 local.properties
 .idea/
-*.apk
-*.aab
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
 
 # Xcode / Apple
 *.xcworkspace/xcuserdata/
 xcuserdata/
 DerivedData/
 *.xcuserstate
+
+# Specs & Agent Context
+.specs/
+.gemini/
+.claude/
+*.scratch
+*.tmp
+*.log

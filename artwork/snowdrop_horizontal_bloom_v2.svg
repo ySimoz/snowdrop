@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 180" width="640" height="180">
+  <rect width="640" height="180" rx="28" fill="#0F172A"/>
+  
+  <!-- Icon Mark with shortened stem & opening shades -->
+  <g id="snowdrop-icon" transform="translate(32, 22) scale(0.26)">
+    <path d="M 246,365 C 246,332 248,308 234,284 C 246,304 266,304 278,284 C 264,308 266,332 266,365 A 10,10 0 0,1 246,365 Z" fill="#38BDF8"/>
+    <path d="M 242,292 C 196,272 135,202 142,125 C 145,95 174,102 192,122 C 218,152 234,228 244,272 Z" fill="#38BDF8"/>
+    <path d="M 246,285 C 222,260 178,198 184,138 C 186,118 206,122 218,138 C 238,166 248,228 252,270 Z" fill="#BAE6FD"/>
+    <path d="M 270,292 C 316,272 377,202 370,125 C 367,95 338,102 320,122 C 294,152 278,228 268,272 Z" fill="#38BDF8"/>
+    <path d="M 266,285 C 290,260 334,198 328,138 C 326,118 306,122 294,138 C 274,166 264,228 260,270 Z" fill="#BAE6FD"/>
+    <path d="M 256,52 C 286,125 288,218 256,292 C 224,218 226,125 256,52 Z" fill="#FFFFFF"/>
+  </g>
+  
+  <!-- Wordmark -->
+  <text x="180" y="102" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="50" font-weight="700" fill="#FFFFFF" letter-spacing="-0.5">
+    Snowdrop
+  </text>
+  
+  <text x="182" y="130" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="600" fill="#94A3B8" letter-spacing="2">
+    PEER-TO-PEER
+  </text>
+</svg>

@@ -84,9 +84,8 @@ class ShareActivity : ComponentActivity() {
                                             SharePeerRow(peer = peer) {
                                                 peer.primaryIP?.let { ip ->
                                                     TransferService.start(this@ShareActivity)
-                                                    for (u in uris) {
-                                                        SnowdropCoreBridge.sendFile(this@ShareActivity, ip, u)
-                                                    }
+                                                    val staged = uris.map { SnowdropCoreBridge.getFileInfo(this@ShareActivity, it) }
+                                                    SnowdropCoreBridge.sendFiles(this@ShareActivity, ip, staged, peer.displayName)
                                                 }
                                                 finish()
                                             }

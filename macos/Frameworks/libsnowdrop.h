@@ -32,6 +32,8 @@ typedef void (*AuthRequiredCallback)(const char* authURL);
 typedef void (*PeersUpdatedCallback)(const char* peersJSON);
 typedef void (*ProgressCallback)(const char* transferID, int64_t current, int64_t total);
 typedef void (*TransferCompleteCallback)(const char* transferID, bool success, const char* errorMsg);
+typedef void (*ApprovalCallback)(const char* transferID, const char* nodeID, const char* senderName, const char* fileName, int64_t fileSize);
+typedef void (*BatchProgressCallback)(const char* batchID, int fileIndex, int totalFiles, const char* fileName, int64_t fileCur, int64_t fileTotal, int64_t batchCur, int64_t batchTotal);
 
 static void callStatusCb(StatusCallback cb, int status, const char* msg) {
     if (cb) cb(status, msg);
@@ -47,6 +49,12 @@ static void callProgressCb(ProgressCallback cb, const char* id, int64_t cur, int
 }
 static void callTransferCompleteCb(TransferCompleteCallback cb, const char* id, bool ok, const char* err) {
     if (cb) cb(id, ok, err);
+}
+static void callApprovalCb(ApprovalCallback cb, const char* id, const char* node, const char* sender, const char* file, int64_t size) {
+    if (cb) cb(id, node, sender, file, size);
+}
+static void callBatchProgressCb(BatchProgressCallback cb, const char* id, int idx, int total, const char* name, int64_t fCur, int64_t fTotal, int64_t bCur, int64_t bTotal) {
+    if (cb) cb(id, idx, total, name, fCur, fTotal, bCur, bTotal);
 }
 
 #line 1 "cgo-generated-wrapper"
@@ -112,10 +120,17 @@ extern "C" {
 #endif
 
 extern void RegisterCallbacks(StatusCallback statusCb, AuthRequiredCallback authCb, PeersUpdatedCallback peersCb, ProgressCallback progressCb, TransferCompleteCallback completeCb);
+extern void RegisterApprovalCallback(ApprovalCallback approvalCb);
+extern void RegisterBatchProgressCallback(BatchProgressCallback batchProgressCb);
 extern int StartEngine(char* dataDir, char* downloadDir, char* deviceName);
 extern void StopEngine(void);
 extern void SendFile(char* peerIP, char* filePath, char* transferID);
+extern void SendBatch(char* peerIP, char* batchID, char* filesJSON);
 extern void CancelTransfer(char* transferID);
+extern _Bool ResolveTransferApproval(char* transferID, int decision);
+extern char* GetTrustedPeers(void);
+extern _Bool RevokeTrusted(char* nodeID);
+extern void SetApprovalConfig(_Bool requireApproval, _Bool autoAcceptTrusted);
 
 #ifdef __cplusplus
 }

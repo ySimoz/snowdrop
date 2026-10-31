@@ -1,5 +1,11 @@
 <resources>
-    <style name="Theme.Snowdrop" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Snowdrop" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/frost_slate_900</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
 
     <style name="Theme.Snowdrop.Translucent" parent="android:Theme.Translucent.NoTitleBar">
         <item name="android:windowIsTranslucent">true</item>

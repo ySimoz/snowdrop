@@ -17,9 +17,15 @@ echo "==> Assembling Snowdrop.app bundle..."
 APP_DIR="$DIR/dist/Snowdrop.app"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
+mkdir -p "$APP_DIR/Contents/Resources"
 mkdir -p "$APP_DIR/Contents/PlugIns/SnowdropShare.appex/Contents/MacOS"
+mkdir -p "$APP_DIR/Contents/PlugIns/SnowdropShare.appex/Contents/Resources"
 cp "$DIR/.build/release/Snowdrop" "$APP_DIR/Contents/MacOS/Snowdrop"
 cp "$DIR/Info.plist" "$APP_DIR/Contents/Info.plist"
+if [ -d "$DIR/Resources" ]; then
+    cp -r "$DIR/Resources/"* "$APP_DIR/Contents/Resources/"
+    cp "$DIR/Resources/AppIcon.icns" "$APP_DIR/Contents/PlugIns/SnowdropShare.appex/Contents/Resources/AppIcon.icns"
+fi
 
 echo "==> Building macOS Share Extension..."
 swiftc -target arm64-apple-macosx13.0 \
@@ -36,7 +42,9 @@ codesign -s - --force "$APP_DIR"
 
 echo "==> Registering with LaunchServices and pluginkit..."
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_DIR" 2>/dev/null || true
+pluginkit -r "$APP_DIR/Contents/PlugIns/SnowdropShare.appex" 2>/dev/null || true
 pluginkit -a "$APP_DIR/Contents/PlugIns/SnowdropShare.appex" 2>/dev/null || true
 pluginkit -e use -i com.snowdrop.mac.share 2>/dev/null || true
+/System/Library/CoreServices/pbs -update 2>/dev/null || true
 
 echo "==> Snowdrop.app built successfully at: $APP_DIR"

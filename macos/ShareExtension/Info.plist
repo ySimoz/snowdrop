@@ -8,6 +8,8 @@
     <string>Snowdrop</string>
     <key>CFBundleDisplayName</key>
     <string>Snowdrop</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>SnowdropShare</string>
     <key>CFBundlePackageType</key>
@@ -31,14 +33,7 @@
         <key>NSExtensionAttributes</key>
         <dict>
             <key>NSExtensionActivationRule</key>
-            <dict>
-                <key>NSExtensionActivationSupportsFileWithMaxCount</key>
-                <integer>10</integer>
-                <key>NSExtensionActivationSupportsImageWithMaxCount</key>
-                <integer>10</integer>
-                <key>NSExtensionActivationSupportsMovieWithMaxCount</key>
-                <integer>10</integer>
-            </dict>
+            <string>TRUEPREDICATE</string>
         </dict>
     </dict>
 </dict>

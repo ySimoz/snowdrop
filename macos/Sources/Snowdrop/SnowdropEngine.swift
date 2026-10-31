@@ -4,6 +4,22 @@ import AppKit
 import UserNotifications
 import CSnowdrop
 
+public struct IncomingApprovalRequest: Identifiable {
+    public let id: String
+    public let nodeID: String
+    public let senderName: String
+    public let fileName: String
+    public let fileSize: Int64
+    public let formattedSize: String
+}
+
+public struct TrustedPeerItem: Codable, Identifiable {
+    public var id: String { node_id }
+    public let node_id: String
+    public let device_name: String
+    public let auto_accept: Bool
+}
+
 public final class SnowdropEngine: ObservableObject {
     public static let shared = SnowdropEngine()
 
@@ -11,41 +27,80 @@ public final class SnowdropEngine: ObservableObject {
     @Published public private(set) var peers: [PeerItem] = []
     @Published public private(set) var activeTransfer: TransferItem?
     @Published public private(set) var recentTransfers: [TransferItem] = []
+    @Published public private(set) var pendingApproval: IncomingApprovalRequest?
+    @Published public private(set) var trustedPeers: [TrustedPeerItem] = []
+    @Published public var requireApproval: Bool = true {
+        didSet {
+            SetApprovalConfig(requireApproval, autoAccept)
+        }
+    }
     @Published public var downloadDirectory: URL
-    @Published public var autoAccept: Bool = true
+    @Published public var autoAccept: Bool = true {
+        didSet {
+            SetApprovalConfig(requireApproval, autoAccept)
+        }
+    }
     @Published public var deviceName: String
-    @Published public var stagedFileURL: URL?
-    @Published public var stagedFileName: String = ""
-    @Published public var stagedFileSizeFormatted: String = ""
+    @Published public var stagedFileURLs: [URL] = []
+
+    public var stagedFileURL: URL? { stagedFileURLs.first }
+    public var stagedFileName: String {
+        if stagedFileURLs.count == 1 {
+            return stagedFileURLs[0].lastPathComponent
+        } else if stagedFileURLs.count > 1 {
+            return "\(stagedFileURLs.count) files staged"
+        }
+        return ""
+    }
+    public var stagedTotalBytes: Int64 {
+        stagedFileURLs.reduce(0) { total, url in
+            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+            return total + size
+        }
+    }
+    public var stagedFileSizeFormatted: String {
+        let size = stagedTotalBytes
+        guard size > 0 else { return stagedFileURLs.isEmpty ? "" : "0 B" }
+        if size >= 1024 * 1024 * 1024 {
+            return String(format: "%.2f GB", Double(size) / (1024 * 1024 * 1024))
+        } else if size >= 1024 * 1024 {
+            return String(format: "%.1f MB", Double(size) / (1024 * 1024))
+        } else if size >= 1024 {
+            return String(format: "%.0f KB", Double(size) / 1024)
+        } else {
+            return "\(size) B"
+        }
+    }
 
     private var isEngineRunning = false
     private var cachedAuthURL: String = ""
     private var lastProgressCheck: Date = Date()
     private var lastBytesCount: Int64 = 0
 
+    public func stageFiles(_ urls: [URL]) {
+        let existingPaths = Set(stagedFileURLs.map { $0.path })
+        let unique = urls.filter { !existingPaths.contains($0.path) }
+        stagedFileURLs.append(contentsOf: unique)
+    }
+
     public func stageFile(_ url: URL) {
-        self.stagedFileURL = url
-        self.stagedFileName = url.lastPathComponent
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-           let size = attrs[.size] as? Int64 {
-            if size >= 1024 * 1024 * 1024 {
-                self.stagedFileSizeFormatted = String(format: "%.2f GB", Double(size) / (1024 * 1024 * 1024))
-            } else if size >= 1024 * 1024 {
-                self.stagedFileSizeFormatted = String(format: "%.1f MB", Double(size) / (1024 * 1024))
-            } else if size >= 1024 {
-                self.stagedFileSizeFormatted = String(format: "%.0f KB", Double(size) / 1024)
-            } else {
-                self.stagedFileSizeFormatted = "\(size) B"
-            }
-        } else {
-            self.stagedFileSizeFormatted = ""
-        }
+        stageFiles([url])
+    }
+
+    public func clearStagedFiles() {
+        stagedFileURLs.removeAll()
     }
 
     public func clearStagedFile() {
-        self.stagedFileURL = nil
-        self.stagedFileName = ""
-        self.stagedFileSizeFormatted = ""
+        clearStagedFiles()
+    }
+
+    public func clearRecentTransfers() {
+        recentTransfers.removeAll()
+    }
+
+    public func removeRecentTransfer(transferID: String) {
+        recentTransfers.removeAll { $0.id == transferID }
     }
 
     private init() {
@@ -101,6 +156,35 @@ public final class SnowdropEngine: ObservableObject {
                 }
             )
 
+            RegisterApprovalCallback { id, node, sender, file, size in
+                let transferID = id != nil ? String(cString: id!) : ""
+                let nodeID = node != nil ? String(cString: node!) : ""
+                let senderName = sender != nil ? String(cString: sender!) : ""
+                let fileName = file != nil ? String(cString: file!) : ""
+                SnowdropEngine.shared.handleIncomingApproval(
+                    transferID: transferID,
+                    nodeID: nodeID,
+                    senderName: senderName,
+                    fileName: fileName,
+                    fileSize: size
+                )
+            }
+
+            RegisterBatchProgressCallback { bID, idx, total, name, fCur, fTotal, bCur, bTotal in
+                let batchID = bID != nil ? String(cString: bID!) : ""
+                let fileName = name != nil ? String(cString: name!) : ""
+                SnowdropEngine.shared.handleBatchProgress(
+                    batchID: batchID,
+                    fileIndex: Int(idx),
+                    totalFiles: Int(total),
+                    fileName: fileName,
+                    fileCur: fCur,
+                    fileTotal: fTotal,
+                    batchCur: bCur,
+                    batchTotal: bTotal
+                )
+            }
+
             let code = StartEngine(dataDir, dlDir, devName)
             NSLog("[Snowdrop] StartEngine returned code: %d", code)
             DispatchQueue.main.async {
@@ -151,22 +235,72 @@ public final class SnowdropEngine: ObservableObject {
     }
 
     public func sendFile(to peer: PeerItem, fileURL: URL) {
-        guard let peerIP = peer.primaryIP else { return }
-        let transferID = "tx-\(UUID().uuidString.prefix(8))"
-        let fileSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        sendFiles(to: peer, fileURLs: [fileURL])
+    }
 
+    public struct FileManifestItem: Codable {
+        public let name: String
+        public let path: String
+        public let size: Int64
+    }
+
+    public func sendFiles(to peer: PeerItem, fileURLs: [URL]) {
+        guard let peerIP = peer.primaryIP, !fileURLs.isEmpty else { return }
+
+        if fileURLs.count == 1 {
+            let fileURL = fileURLs[0]
+            let transferID = "tx-\(UUID().uuidString.prefix(8))"
+            let fileSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+
+            let transfer = TransferItem(
+                id: transferID,
+                fileName: fileURL.lastPathComponent,
+                peerName: peer.displayName,
+                direction: .outgoing,
+                bytesTransferred: 0,
+                totalBytes: Int64(fileSize),
+                speedBytesPerSec: 0,
+                isCompleted: false,
+                isSuccess: false,
+                errorMessage: nil,
+                startTime: Date()
+            )
+
+            DispatchQueue.main.async {
+                self.activeTransfer = transfer
+                self.lastProgressCheck = Date()
+                self.lastBytesCount = 0
+            }
+
+            SendFile(peerIP, fileURL.path, transferID)
+            return
+        }
+
+        let batchID = "batch-\(UUID().uuidString.prefix(8))"
+        let totalSize = fileURLs.reduce(Int64(0)) { total, url in
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+            return total + Int64(size)
+        }
+
+        let firstSize = Int64((try? fileURLs.first?.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
         let transfer = TransferItem(
-            id: transferID,
-            fileName: fileURL.lastPathComponent,
+            id: batchID,
+            fileName: "\(fileURLs.count) files",
             peerName: peer.displayName,
             direction: .outgoing,
             bytesTransferred: 0,
-            totalBytes: Int64(fileSize),
+            totalBytes: totalSize,
             speedBytesPerSec: 0,
             isCompleted: false,
             isSuccess: false,
             errorMessage: nil,
-            startTime: Date()
+            startTime: Date(),
+            isBatch: true,
+            fileIndex: 1,
+            totalFiles: fileURLs.count,
+            currentFileName: fileURLs.first?.lastPathComponent ?? "",
+            currentFileBytes: 0,
+            currentFileTotal: firstSize
         )
 
         DispatchQueue.main.async {
@@ -175,7 +309,24 @@ public final class SnowdropEngine: ObservableObject {
             self.lastBytesCount = 0
         }
 
-        SendFile(peerIP, fileURL.path, transferID)
+        var items: [FileManifestItem] = []
+        for u in fileURLs {
+            let size = Int64((try? u.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+            items.append(FileManifestItem(name: u.lastPathComponent, path: u.path, size: size))
+        }
+
+        guard let jsonData = try? JSONEncoder().encode(items),
+              let jsonStr = String(data: jsonData, encoding: .utf8) else {
+            return
+        }
+
+        peerIP.withCString { cIP in
+            batchID.withCString { cBatchID in
+                jsonStr.withCString { cJSON in
+                    SendBatch(cIP, cBatchID, cJSON)
+                }
+            }
+        }
     }
 
     public func cancelActiveTransfer() {
@@ -194,6 +345,19 @@ public final class SnowdropEngine: ObservableObject {
         if panel.runModal() == .OK, let selected = panel.url {
             self.downloadDirectory = selected
         }
+    }
+
+    public var defaultDownloadDirectory: URL {
+        FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
+    }
+
+    public var isDefaultDownloadDirectory: Bool {
+        downloadDirectory.path == defaultDownloadDirectory.path
+    }
+
+    public func resetDownloadFolder() {
+        self.downloadDirectory = defaultDownloadDirectory
     }
 
     // MARK: - Internal Callback Handlers
@@ -283,6 +447,64 @@ public final class SnowdropEngine: ObservableObject {
         }
     }
 
+    func handleBatchProgress(
+        batchID: String,
+        fileIndex: Int,
+        totalFiles: Int,
+        fileName: String,
+        fileCur: Int64,
+        fileTotal: Int64,
+        batchCur: Int64,
+        batchTotal: Int64
+    ) {
+        DispatchQueue.main.async {
+            guard var currentTransfer = self.activeTransfer, currentTransfer.id == batchID else {
+                let newTransfer = TransferItem(
+                    id: batchID,
+                    fileName: "\(totalFiles) files",
+                    peerName: "Tailnet Peer",
+                    direction: .incoming,
+                    bytesTransferred: batchCur,
+                    totalBytes: batchTotal,
+                    speedBytesPerSec: 0,
+                    isCompleted: false,
+                    isSuccess: false,
+                    errorMessage: nil,
+                    startTime: Date(),
+                    isBatch: totalFiles > 1,
+                    fileIndex: fileIndex,
+                    totalFiles: totalFiles,
+                    currentFileName: fileName,
+                    currentFileBytes: fileCur,
+                    currentFileTotal: fileTotal
+                )
+                self.activeTransfer = newTransfer
+                self.lastProgressCheck = Date()
+                self.lastBytesCount = batchCur
+                return
+            }
+
+            let now = Date()
+            let timeDiff = now.timeIntervalSince(self.lastProgressCheck)
+            if timeDiff >= 0.5 {
+                let bytesDiff = batchCur - self.lastBytesCount
+                currentTransfer.speedBytesPerSec = max(0, Double(bytesDiff) / timeDiff)
+                self.lastProgressCheck = now
+                self.lastBytesCount = batchCur
+            }
+
+            currentTransfer.bytesTransferred = batchCur
+            currentTransfer.totalBytes = batchTotal
+            currentTransfer.isBatch = totalFiles > 1
+            currentTransfer.fileIndex = fileIndex
+            currentTransfer.totalFiles = totalFiles
+            currentTransfer.currentFileName = fileName
+            currentTransfer.currentFileBytes = fileCur
+            currentTransfer.currentFileTotal = fileTotal
+            self.activeTransfer = currentTransfer
+        }
+    }
+
     func handleTransferComplete(transferID: String, success: Bool, errorMsg: String) {
         DispatchQueue.main.async {
             guard var transfer = self.activeTransfer, transfer.id == transferID else { return }
@@ -305,7 +527,84 @@ public final class SnowdropEngine: ObservableObject {
         }
     }
 
+    func handleIncomingApproval(transferID: String, nodeID: String, senderName: String, fileName: String, fileSize: Int64) {
+        DispatchQueue.main.async {
+            let formattedSize: String
+            if fileSize >= 1024 * 1024 * 1024 {
+                formattedSize = String(format: "%.2f GB", Double(fileSize) / (1024 * 1024 * 1024))
+            } else if fileSize >= 1024 * 1024 {
+                formattedSize = String(format: "%.1f MB", Double(fileSize) / (1024 * 1024))
+            } else {
+                formattedSize = String(format: "%.0f KB", Double(fileSize) / 1024)
+            }
+
+            let req = IncomingApprovalRequest(
+                id: transferID,
+                nodeID: nodeID,
+                senderName: senderName,
+                fileName: fileName,
+                fileSize: fileSize,
+                formattedSize: formattedSize
+            )
+            self.pendingApproval = req
+
+            let content = UNMutableNotificationContent()
+            content.title = "Incoming File Transfer"
+            content.body = "\(senderName) wants to send \(fileName) (\(formattedSize))"
+            content.sound = .default
+            content.categoryIdentifier = "TRANSFER_APPROVAL"
+            content.userInfo = ["transferID": transferID]
+
+            let notifReq = UNNotificationRequest(identifier: transferID, content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(notifReq, withCompletionHandler: nil)
+        }
+    }
+
+    public func resolveApproval(transferID: String, decision: Int) {
+        DispatchQueue.main.async {
+            if self.pendingApproval?.id == transferID {
+                self.pendingApproval = nil
+            }
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [transferID])
+        }
+        _ = transferID.withCString { cID in
+            ResolveTransferApproval(cID, Int32(decision))
+        }
+        refreshTrustedPeers()
+    }
+
+    public func refreshTrustedPeers() {
+        if let jsonPtr = GetTrustedPeers() {
+            defer { free(jsonPtr) }
+            let jsonStr = String(cString: jsonPtr)
+            if let data = jsonStr.data(using: .utf8),
+               let list = try? JSONDecoder().decode([TrustedPeerItem].self, from: data) {
+                DispatchQueue.main.async {
+                    self.trustedPeers = list
+                }
+            }
+        }
+    }
+
+    public func revokeTrustedPeer(nodeID: String) {
+        _ = nodeID.withCString { cNode in
+            RevokeTrusted(cNode)
+        }
+        refreshTrustedPeers()
+    }
+
     private func setupNotifications() {
+        let acceptAction = UNNotificationAction(identifier: "ACTION_ACCEPT", title: "Accept", options: [.foreground])
+        let trustAction = UNNotificationAction(identifier: "ACTION_TRUST", title: "Always Trust", options: [])
+        let declineAction = UNNotificationAction(identifier: "ACTION_DECLINE", title: "Decline", options: [.destructive])
+
+        let category = UNNotificationCategory(
+            identifier: "TRANSFER_APPROVAL",
+            actions: [acceptAction, trustAction, declineAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 

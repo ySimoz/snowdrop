@@ -19,18 +19,21 @@ import (
 
 // Engine represents an active Snowdrop node powered by tsnet
 type Engine struct {
-	config    *EngineConfig
-	tsServer  *tsnet.Server
-	listener  net.Listener
-	httpSrv   *http.Server
-	transfers *TransferManager
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	mu        sync.Mutex
-	status    int
-	authURL   string
-	lastPeers string
+	config      *EngineConfig
+	tsServer    *tsnet.Server
+	listener    net.Listener
+	httpSrv     *http.Server
+	transfers   *TransferManager
+	trustStore  *TrustStore
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	mu          sync.Mutex
+	status      int
+	authURL     string
+	lastPeers   string
+	peerNamesMu sync.RWMutex
+	peerNames   map[string]string
 }
 
 // NewEngine initializes a Snowdrop engine instance
@@ -51,15 +54,18 @@ func NewEngine(cfg *EngineConfig) (*Engine, error) {
 		cfg.DeviceName = "device"
 	}
 
-	tm := NewTransferManager(cfg)
+	ts, _ := NewTrustStore(cfg.DataDir)
+	tm := NewTransferManager(cfg, ts)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Engine{
-		config:    cfg,
-		transfers: tm,
-		ctx:       ctx,
-		cancel:    cancel,
-		status:    StatusDisconnected,
+		config:     cfg,
+		transfers:  tm,
+		trustStore: ts,
+		ctx:        ctx,
+		cancel:     cancel,
+		status:     StatusDisconnected,
+		peerNames:  make(map[string]string),
 	}, nil
 }
 
@@ -120,6 +126,22 @@ func (e *Engine) runServer(serverHostname string) {
 		e.updateStatus(StatusError, err.Error())
 		return
 	}
+
+	e.transfers.SetWhoIsResolver(func(ctx context.Context, remoteAddr string) (string, error) {
+		lc, err := e.tsServer.LocalClient()
+		if err != nil {
+			return "", err
+		}
+		who, err := lc.WhoIs(ctx, remoteAddr)
+		if err != nil || who == nil || who.Node == nil {
+			return "", err
+		}
+		nodeName := who.Node.ComputedName
+		if nodeName == "" {
+			nodeName = who.Node.Hostinfo.Hostname()
+		}
+		return strings.ToLower(nodeName), nil
+	})
 
 	ln, err := e.tsServer.Listen("tcp", fmt.Sprintf(":%d", e.config.Port))
 	if err != nil {
@@ -232,9 +254,33 @@ func (e *Engine) syncPeers(st any) {
 			cleanHostName = strings.TrimPrefix(peer.HostName, "snowdrop-")
 		}
 
+		primaryIP := ""
+		if len(ips) > 0 {
+			primaryIP = ips[0]
+		}
+
+		displayName := cleanHostName
+		if isSnowdrop {
+			e.peerNamesMu.RLock()
+			cachedName, hasCached := e.peerNames[primaryIP]
+			e.peerNamesMu.RUnlock()
+
+			if hasCached && cachedName != "" {
+				displayName = cachedName
+			} else {
+				displayName = humanizeHostname(cleanHostName)
+				if peer.Online && primaryIP != "" {
+					go e.fetchPeerInfo(primaryIP)
+				}
+			}
+		} else {
+			displayName = humanizeHostname(cleanHostName)
+		}
+
 		info := PeerInfo{
 			ID:          string(peer.ID),
 			HostName:    cleanHostName,
+			DisplayName: displayName,
 			DNSName:     strings.TrimSuffix(peer.DNSName, "."),
 			OS:          peer.OS,
 			IPAddresses: ips,
@@ -308,12 +354,61 @@ func (e *Engine) SendFile(peerIP string, filePath string, transferID string) err
 		return errors.New("engine not started")
 	}
 	client := e.tsServer.HTTPClient()
-	return e.transfers.SendFile(e.ctx, client, peerIP, e.config.Port, filePath, transferID)
+	sanitizedName := sanitizeHostname(e.config.DeviceName)
+	serverHostname := fmt.Sprintf("snowdrop-%s", sanitizedName)
+	return e.transfers.SendFile(e.ctx, client, peerIP, e.config.Port, filePath, transferID, serverHostname)
+}
+
+// SendBatch initiates an outbound multi-file batch transfer to a peer IP
+func (e *Engine) SendBatch(peerIP string, batchID string, files []BatchSendSource) error {
+	if e.tsServer == nil {
+		return errors.New("engine not started")
+	}
+	client := e.tsServer.HTTPClient()
+	sanitizedName := sanitizeHostname(e.config.DeviceName)
+	serverHostname := fmt.Sprintf("snowdrop-%s", sanitizedName)
+	return e.transfers.SendBatch(e.ctx, client, peerIP, e.config.Port, batchID, files, serverHostname)
 }
 
 // CancelTransfer aborts an active transfer
 func (e *Engine) CancelTransfer(transferID string) bool {
 	return e.transfers.Cancel(transferID)
+}
+
+// ResolveApproval resolves an incoming transfer approval request
+func (e *Engine) ResolveApproval(transferID string, decision int) bool {
+	if e.transfers == nil {
+		return false
+	}
+	return e.transfers.ResolveApproval(transferID, decision)
+}
+
+// GetTrustedPeersJSON returns a JSON string of all remembered trusted peers
+func (e *Engine) GetTrustedPeersJSON() string {
+	if e.trustStore == nil {
+		return "[]"
+	}
+	data, err := json.Marshal(e.trustStore.List())
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+// RevokeTrusted removes a peer from trusted status
+func (e *Engine) RevokeTrusted(nodeID string) bool {
+	if e.trustStore == nil {
+		return false
+	}
+	return e.trustStore.RevokeTrusted(nodeID) == nil
+}
+
+// SetApprovalConfig updates security approval preferences
+func (e *Engine) SetApprovalConfig(requireApproval, autoAcceptTrusted bool) {
+	e.mu.Lock()
+	e.config.RequireApproval = requireApproval
+	e.config.AutoAcceptTrusted = autoAcceptTrusted
+	e.mu.Unlock()
 }
 
 func sanitizeHostname(name string) string {
@@ -333,4 +428,63 @@ func sanitizeHostname(name string) string {
 func extractURL(text string) string {
 	r := regexp.MustCompile(`https?://[^\s]+`)
 	return r.FindString(text)
+}
+
+func humanizeHostname(name string) string {
+	parts := strings.Split(name, "-")
+	var formatted []string
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		formatted = append(formatted, strings.ToUpper(p[:1])+strings.ToLower(p[1:]))
+	}
+	if len(formatted) == 0 {
+		return name
+	}
+	return strings.Join(formatted, " ")
+}
+
+func (e *Engine) fetchPeerInfo(ip string) {
+	e.mu.Lock()
+	tsSrv := e.tsServer
+	e.mu.Unlock()
+	if tsSrv == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Second)
+	defer cancel()
+
+	client := tsSrv.HTTPClient()
+	url := fmt.Sprintf("http://%s:%d/v1/info", ip, e.config.Port)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+
+	var info NodeInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return
+	}
+
+	if info.DeviceName != "" {
+		e.peerNamesMu.Lock()
+		prev := e.peerNames[ip]
+		e.peerNames[ip] = info.DeviceName
+		e.peerNamesMu.Unlock()
+
+		if prev != info.DeviceName {
+			go e.syncPeers(nil)
+		}
+	}
 }

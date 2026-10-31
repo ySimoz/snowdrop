@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 180" width="640" height="180">
+  <rect width="640" height="180" rx="28" fill="#0F172A"/>
+  
+  <!-- Icon Mark -->
+  <g id="snowdrop-icon" transform="translate(32, 22) scale(0.26)">
+    <path d="M 245,410 C 245,348 248,312 232,282 C 198,246 138,186 145,120 C 148,94 176,98 196,118 C 225,148 242,218 248,268 C 250,278 262,278 264,268 C 270,218 287,148 316,118 C 336,98 364,94 367,120 C 374,186 314,246 280,282 C 264,312 267,348 267,410 A 11,11 0 0,1 245,410 Z" fill="#38BDF8"/>
+    <path d="M 256,52 C 288,125 288,218 256,285 C 224,218 224,125 256,52 Z" fill="#FFFFFF"/>
+  </g>
+  
+  <!-- Wordmark -->
+  <text x="180" y="102" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="50" font-weight="700" fill="#FFFFFF" letter-spacing="-0.5">
+    Snowdrop
+  </text>
+  
+  <text x="182" y="130" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="600" fill="#94A3B8" letter-spacing="2">
+    PEER-TO-PEER
+  </text>
+</svg>

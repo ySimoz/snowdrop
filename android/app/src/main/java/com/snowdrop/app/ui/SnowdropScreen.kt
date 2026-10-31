@@ -1,11 +1,19 @@
 package com.snowdrop.app.ui
 
+import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -19,15 +27,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.snowdrop.app.R
 import com.snowdrop.app.core.EngineStatus
 import com.snowdrop.app.core.PeerItem
 import com.snowdrop.app.core.SnowdropCoreBridge
 import com.snowdrop.app.core.TransferItem
 import com.snowdrop.app.service.TransferService
+import com.snowdrop.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,30 +49,65 @@ fun SnowdropScreen() {
     val activeTransfer by SnowdropCoreBridge.activeTransfer.collectAsState()
     val recentTransfers by SnowdropCoreBridge.recentTransfers.collectAsState()
     val currentDeviceName by SnowdropCoreBridge.deviceName.collectAsState()
+    val downloadLocationName by SnowdropCoreBridge.downloadLocationName.collectAsState()
+    val pendingApproval by SnowdropCoreBridge.pendingApproval.collectAsState()
+    val trustedPeers by SnowdropCoreBridge.trustedPeers.collectAsState()
+    val requireApproval by SnowdropCoreBridge.requireApproval.collectAsState()
+    val autoAccept by SnowdropCoreBridge.autoAccept.collectAsState()
 
-    var stagedFile by remember { mutableStateOf<SnowdropCoreBridge.StagedFile?>(null) }
+    var stagedFiles by remember { mutableStateOf<List<SnowdropCoreBridge.StagedFile>>(emptyList()) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showSettingsSheet by remember { mutableStateOf(false) }
     var renameInputText by remember { mutableStateOf("") }
 
+    LaunchedEffect(Unit) {
+        SnowdropCoreBridge.refreshTrustedPeers()
+    }
+
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            val existing = stagedFiles.map { it.uri }.toSet()
+            val newFiles = uris.filter { it !in existing }.map { SnowdropCoreBridge.getFileInfo(context, it) }
+            stagedFiles = stagedFiles + newFiles
+        }
+    }
+
+    val directoryPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
-        uri?.let {
-            stagedFile = SnowdropCoreBridge.getFileInfo(context, it)
+        if (uri != null) {
+            SnowdropCoreBridge.setCustomDownloadTreeUri(context, uri)
         }
     }
 
     if (showRenameDialog) {
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            title = { Text("Rename Device") },
+            containerColor = FrostSlate800,
+            title = {
+                Text(
+                    "Rename Device",
+                    color = FrostSlate100,
+                    fontWeight = FontWeight.Bold
+                )
+            },
             text = {
                 OutlinedTextField(
                     value = renameInputText,
                     onValueChange = { renameInputText = it },
                     label = { Text("Device Name") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = FrostSlate100,
+                        unfocusedTextColor = FrostSlate100,
+                        focusedBorderColor = FrostIceBlue,
+                        unfocusedBorderColor = FrostSlate600,
+                        focusedLabelColor = FrostIceBlue,
+                        unfocusedLabelColor = FrostSlate400
+                    )
                 )
             },
             confirmButton = {
@@ -70,102 +116,242 @@ fun SnowdropScreen() {
                         SnowdropCoreBridge.setDeviceName(context, renameInputText)
                         showRenameDialog = false
                     },
-                    enabled = renameInputText.isNotBlank()
+                    enabled = renameInputText.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = FrostIceBlue,
+                        contentColor = FrostSlate950
+                    )
                 ) {
-                    Text("Save")
+                    Text("Save", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showRenameDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = FrostSlate400)
                 }
             }
         )
     }
 
     Scaffold(
+        containerColor = FrostSlate900,
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = FrostSlate900,
+                    titleContentColor = FrostSlate100
+                ),
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.FilterVintage,
-                            contentDescription = "Snowdrop",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            "Snowdrop",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 2.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(FrostIceBlue.copy(alpha = 0.15f))
+                                .border(1.dp, FrostIceBlue.copy(alpha = 0.3f), RoundedCornerShape(9.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.ic_snowdrop_flower),
+                                contentDescription = "Snowdrop",
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                "Snowdrop",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                color = FrostSlate100
+                            )
+                            Text(
+                                currentDeviceName.ifEmpty { "Android" },
+                                fontSize = 12.sp,
+                                color = FrostSlate400,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 },
                 actions = {
-                    StatusPill(status = status)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 6.dp)
+                    ) {
+                        StatusPill(status = status)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        IconButton(
+                            onClick = { showSettingsSheet = true },
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = FrostSlate400,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
                 }
             )
         }
     ) { paddingValues ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                end = 20.dp,
+                top = paddingValues.calculateTopPadding() + 18.dp,
+                bottom = paddingValues.calculateBottomPadding() + 28.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(26.dp)
         ) {
-            // Device Identity
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Smartphone,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        currentDeviceName.ifEmpty { "My Device" },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = {
-                            renameInputText = currentDeviceName
-                            showRenameDialog = true
-                        }
+            // Incoming Approval Banner
+            if (pendingApproval != null) {
+                item {
+                    val req = pendingApproval!!
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = FrostSlate800),
+                        border = BorderStroke(1.dp, FrostIceBlue.copy(alpha = 0.5f))
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Rename",
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(26.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(FrostIceBlue.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Security,
+                                        contentDescription = null,
+                                        tint = FrostIceBlue,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "Transfer Request",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = FrostSlate100
+                                )
+                            }
+                            Text(
+                                "${req.senderName} wants to send ${req.fileName} (${req.formattedSize})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = FrostSlate400
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Button(
+                                    onClick = { SnowdropCoreBridge.resolveApproval(req.transferId, 1) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = FrostIceBlue,
+                                        contentColor = FrostSlate950
+                                    )
+                                ) {
+                                    Text(
+                                        "Accept",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        maxLines = 1
+                                    )
+                                }
+
+                                OutlinedButton(
+                                    onClick = { SnowdropCoreBridge.resolveApproval(req.transferId, 2) },
+                                    modifier = Modifier
+                                        .weight(1.25f)
+                                        .height(36.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                    border = BorderStroke(1.dp, FrostIceBlue.copy(alpha = 0.4f)),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = FrostIceBlue.copy(alpha = 0.12f),
+                                        contentColor = FrostIceBlue
+                                    )
+                                ) {
+                                    Text(
+                                        "Always Trust",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 12.sp,
+                                        maxLines = 1
+                                    )
+                                }
+
+                                OutlinedButton(
+                                    onClick = { SnowdropCoreBridge.resolveApproval(req.transferId, 3) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                    border = BorderStroke(1.dp, FrostRose.copy(alpha = 0.4f)),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = FrostRose.copy(alpha = 0.12f),
+                                        contentColor = FrostRose
+                                    )
+                                ) {
+                                    Text(
+                                        "Decline",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 12.sp,
+                                        color = FrostRose,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            // Auth Banner if required
+            // Tailscale Auth Banner
             if (status is EngineStatus.NeedsAuth) {
                 item {
                     val authUrl = (status as EngineStatus.NeedsAuth).url
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        colors = CardDefaults.cardColors(containerColor = FrostAmber.copy(alpha = 0.15f)),
+                        border = BorderStroke(1.dp, FrostAmber.copy(alpha = 0.35f)),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(modifier = Modifier.padding(14.dp)) {
                             Text(
-                                "Sign in Required",
+                                "Tailscale Sign-in Required",
                                 fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onErrorContainer
+                                style = MaterialTheme.typography.titleSmall,
+                                color = FrostAmber
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Sign in to discover devices on your Tailnet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = FrostSlate400
                             )
                             Spacer(modifier = Modifier.height(10.dp))
                             Button(
@@ -177,172 +363,395 @@ fun SnowdropScreen() {
                                 },
                                 enabled = authUrl.isNotEmpty(),
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp)
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = FrostAmber,
+                                    contentColor = FrostSlate950
+                                )
                             ) {
-                                Text("Sign in with Tailscale")
+                                Text("Sign in with Tailscale", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
             }
 
-            // Active Transfer
+            // Standalone Active Transfer Card (only when peer is not in visible list)
             activeTransfer?.let { transfer ->
-                item {
+                val isMatchedToVisiblePeer = peers.any { p ->
+                    p.displayName == transfer.peerName ||
+                    p.hostName == transfer.peerName ||
+                    p.ipAddresses.contains(transfer.peerName)
+                }
+                if (!isMatchedToVisiblePeer) {
+                    item {
+                        Text(
+                            "TRANSFERRING",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = FrostIceBlue,
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        ActiveTransferCard(
+                            transfer = transfer,
+                            onCancel = { SnowdropCoreBridge.cancelTransfer(transfer.id) }
+                        )
+                    }
+                }
+            }
+
+            // Staged File Section
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        "ACTIVE TRANSFER",
+                        "FILE",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                        color = FrostSlate400,
+                        fontSize = 11.sp,
+                        letterSpacing = 0.8.sp
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    ActiveTransferCard(
-                        transfer = transfer,
-                        onCancel = { SnowdropCoreBridge.cancelTransfer(transfer.id) }
-                    )
-                }
-            }
 
-            // File Selection / Staging
-            item {
-                Text(
-                    "FILE",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-
-                if (stagedFile == null) {
-                    FilledTonalButton(
-                        onClick = { filePickerLauncher.launch("*/*") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AttachFile,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            "Choose File",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                } else {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
-                    ) {
-                        Row(
+                    if (stagedFiles.isEmpty()) {
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .clickable { filePickerLauncher.launch("*/*") },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = GlassCardBg),
+                            border = BorderStroke(1.dp, GlassBorderMuted)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.InsertDriveFile,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp, horizontal = 20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(FrostIceBlue.copy(alpha = 0.12f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AttachFile,
+                                        contentDescription = null,
+                                        tint = FrostIceBlue,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    stagedFile!!.name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    "Choose Files",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = FrostSlate100
                                 )
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    stagedFile!!.formattedSize,
+                                    "Tap to select one or more files to send",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            IconButton(onClick = { stagedFile = null }) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Clear",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = FrostSlate400
                                 )
                             }
                         }
-                    }
-                }
-            }
-
-            // Available Devices
-            item {
-                Text(
-                    "DEVICES (${peers.size})",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-            }
-
-            if (peers.isEmpty()) {
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
+                    } else {
+                        val totalBytes = stagedFiles.sumOf { it.size }
+                        val formattedTotal = when {
+                            totalBytes >= 1024 * 1024 * 1024 -> String.format("%.2f GB", totalBytes.toDouble() / (1024 * 1024 * 1024))
+                            totalBytes >= 1024 * 1024 -> String.format("%.1f MB", totalBytes.toDouble() / (1024 * 1024))
+                            totalBytes >= 1024 -> String.format("%.0f KB", totalBytes.toDouble() / 1024)
+                            totalBytes > 0 -> "$totalBytes B"
+                            else -> "0 B"
+                        }
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = GlassCardBg),
+                            border = BorderStroke(1.dp, GlassBorder)
                         ) {
-                            Text(
-                                when {
-                                    status is EngineStatus.Connected -> "No devices online."
-                                    status is EngineStatus.NeedsAuth -> "Sign in to see devices."
-                                    else -> "Connecting..."
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            } else {
-                items(peers) { peer ->
-                    PeerCard(
-                        peer = peer,
-                        hasStagedFile = stagedFile != null,
-                        onSend = {
-                            stagedFile?.let { file ->
-                                peer.primaryIP?.let { ip ->
-                                    TransferService.start(context)
-                                    SnowdropCoreBridge.sendFile(context, ip, file.uri)
-                                    stagedFile = null
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(FrostIceBlue.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.InsertDriveFile,
+                                            contentDescription = null,
+                                            tint = FrostIceBlue,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            if (stagedFiles.size == 1) stagedFiles[0].name else "${stagedFiles.size} files staged",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = FrostSlate100,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            formattedTotal,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = FrostSlate400
+                                        )
+                                    }
+                                    IconButton(onClick = { stagedFiles = emptyList() }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Clear",
+                                            tint = FrostSlate400
+                                        )
+                                    }
+                                }
+
+                                if (stagedFiles.size > 1) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(FrostSlate900.copy(alpha = 0.5f))
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        stagedFiles.take(3).forEach { f ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    f.name,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = FrostSlate100,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    f.formattedSize,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = FrostSlate400
+                                                )
+                                            }
+                                        }
+                                        if (stagedFiles.size > 3) {
+                                            Text(
+                                                "... and ${stagedFiles.size - 3} more",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = FrostIceBlue
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    TextButton(
+                                        onClick = { filePickerLauncher.launch("*/*") },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = null,
+                                            tint = FrostIceBlue,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            "Add More Files",
+                                            color = FrostIceBlue,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
                             }
                         }
-                    )
+                    }
                 }
             }
 
-            // Recent Transfers
+            // Devices Section
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "DEVICES (${peers.size})",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = FrostSlate400,
+                            fontSize = 11.sp,
+                            letterSpacing = 0.8.sp
+                        )
+                        if (peers.isNotEmpty()) {
+                            val onlineCount = peers.count { it.online }
+                            Text(
+                                "$onlineCount online",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = FrostSlate400.copy(alpha = 0.7f),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    if (peers.isEmpty()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = GlassCardBg),
+                            border = BorderStroke(1.dp, GlassBorderMuted)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 32.dp, horizontal = 20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(CircleShape)
+                                        .background(FrostSlate700.copy(alpha = 0.4f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Devices,
+                                        contentDescription = null,
+                                        tint = FrostSlate400,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    when {
+                                        status is EngineStatus.Connected -> "No other devices on Tailnet"
+                                        status is EngineStatus.NeedsAuth -> "Sign in above to see devices"
+                                        else -> "Connecting to network..."
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = FrostSlate400
+                                )
+                            }
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            peers.forEach { peer ->
+                                val isTransferringWithPeer = activeTransfer != null &&
+                                    (activeTransfer?.peerName == peer.displayName ||
+                                     activeTransfer?.peerName == peer.hostName ||
+                                     peer.ipAddresses.contains(activeTransfer?.peerName))
+
+                                PeerCard(
+                                    peer = peer,
+                                    hasStagedFile = stagedFiles.isNotEmpty(),
+                                    transferItem = if (isTransferringWithPeer) activeTransfer else null,
+                                    onSend = {
+                                        if (stagedFiles.isNotEmpty()) {
+                                            SnowdropCoreBridge.sendFiles(context, peer, stagedFiles)
+                                            stagedFiles = emptyList()
+                                        }
+                                    },
+                                    onCancelTransfer = {
+                                        activeTransfer?.let { SnowdropCoreBridge.cancelTransfer(it.id) }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Recent Transfers Section
             if (recentTransfers.isNotEmpty()) {
                 item {
-                    Text(
-                        "RECENT TRANSFERS",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
-                items(recentTransfers) { recent ->
-                    RecentTransferRow(transfer = recent)
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "RECENT TRANSFERS",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = FrostSlate400,
+                                fontSize = 11.sp,
+                                letterSpacing = 0.8.sp
+                            )
+                            TextButton(
+                                onClick = { SnowdropCoreBridge.clearRecentTransfers() },
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text(
+                                    "Clear All",
+                                    color = FrostRose,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            recentTransfers.forEach { recent ->
+                                key(recent.id) {
+                                    val dismissState = rememberSwipeToDismissBoxState(
+                                        confirmValueChange = { value ->
+                                            if (value == SwipeToDismissBoxValue.EndToStart || value == SwipeToDismissBoxValue.StartToEnd) {
+                                                SnowdropCoreBridge.removeRecentTransfer(recent.id)
+                                                true
+                                            } else false
+                                        }
+                                    )
+                                    SwipeToDismissBox(
+                                        state = dismissState,
+                                        backgroundContent = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(FrostRose.copy(alpha = 0.2f))
+                                                    .padding(horizontal = 16.dp),
+                                                contentAlignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart else Alignment.CenterEnd
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Delete",
+                                                    tint = FrostRose
+                                                )
+                                            }
+                                        }
+                                    ) {
+                                        RecentTransferRow(transfer = recent)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -351,30 +760,276 @@ fun SnowdropScreen() {
             }
         }
     }
+
+    if (showSettingsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSettingsSheet = false },
+            containerColor = FrostSlate900,
+            dragHandle = {
+                BottomSheetDefaults.DragHandle(color = FrostSlate600)
+            }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+                    .navigationBarsPadding()
+                    .padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Settings",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = FrostSlate100
+                    )
+                    IconButton(
+                        onClick = { showSettingsSheet = false },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = FrostSlate400
+                        )
+                    }
+                }
+
+                Divider(color = FrostSlate700.copy(alpha = 0.5f), thickness = 0.8.dp)
+
+                // 1. Device Name
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "DEVICE NAME",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = FrostSlate400,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            currentDeviceName.ifEmpty { "My Device" },
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = FrostSlate100
+                        )
+                        TextButton(
+                            onClick = {
+                                renameInputText = currentDeviceName
+                                showRenameDialog = true
+                            }
+                        ) {
+                            Text("Rename", color = FrostIceBlue, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+
+                Divider(color = FrostSlate700.copy(alpha = 0.5f), thickness = 0.8.dp)
+
+                // 2. Storage Location
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "STORAGE",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = FrostSlate400,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        downloadLocationName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = FrostSlate100,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { directoryPickerLauncher.launch(null) },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, FrostSlate600),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = FrostSlate100)
+                        ) {
+                            Text("Change Folder...", fontSize = 12.sp)
+                        }
+                        if (downloadLocationName != "Downloads/Snowdrop") {
+                            OutlinedButton(
+                                onClick = { SnowdropCoreBridge.setCustomDownloadTreeUri(context, null) },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, FrostSlate700),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = FrostSlate400)
+                            ) {
+                                Text("Reset", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
+                Divider(color = FrostSlate700.copy(alpha = 0.5f), thickness = 0.8.dp)
+
+                // 3. Security & Approvals
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "SECURITY & APPROVALS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = FrostSlate400,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "Require Approval for New Devices",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = FrostSlate100,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = requireApproval,
+                            onCheckedChange = { SnowdropCoreBridge.setApprovalConfig(it, autoAccept) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = FrostIceBlue,
+                                checkedTrackColor = FrostIceBlue.copy(alpha = 0.3f)
+                            )
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "Auto-accept from Trusted",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = FrostSlate100,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = autoAccept,
+                            onCheckedChange = { SnowdropCoreBridge.setApprovalConfig(requireApproval, it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = FrostIceBlue,
+                                checkedTrackColor = FrostIceBlue.copy(alpha = 0.3f)
+                            )
+                        )
+                    }
+
+                    Text(
+                        "Trusted Devices (${trustedPeers.size})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = FrostSlate400,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    if (trustedPeers.isEmpty()) {
+                        Text(
+                            "No trusted devices yet",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = FrostSlate400.copy(alpha = 0.7f)
+                        )
+                    } else {
+                        trustedPeers.forEach { peer ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    peer.deviceName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = FrostSlate100,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = { SnowdropCoreBridge.revokeTrustedPeer(peer.nodeId) }) {
+                                    Text("Revoke", color = FrostRose, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Divider(color = FrostSlate700.copy(alpha = 0.5f), thickness = 0.8.dp)
+
+                // 4. Network Stack
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "NETWORK",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = FrostSlate400,
+                        fontWeight = FontWeight.Bold
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            SnowdropCoreBridge.restart(context)
+                            Toast.makeText(context, "Restarting network stack...", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, FrostSlate700),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = FrostSlate100)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            tint = FrostSlate400,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Restart Network Stack", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
 fun StatusPill(status: EngineStatus) {
     val (dotColor, label) = when (status) {
-        is EngineStatus.Connected -> Color(0xFF4CAF50) to "Online"
-        is EngineStatus.NeedsAuth -> Color(0xFFFF9800) to "Sign In"
-        is EngineStatus.Connecting -> Color(0xFFFFB300) to "Connecting"
-        else -> Color(0xFF9E9E9E) to "Offline"
+        is EngineStatus.Connected -> FrostEmerald to "Online"
+        is EngineStatus.NeedsAuth -> FrostAmber to "Sign In"
+        is EngineStatus.Connecting -> FrostIceBlue to "Connecting"
+        else -> FrostSlate600 to "Offline"
     }
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .padding(end = 12.dp)
-            .background(dotColor.copy(alpha = 0.15f), shape = RoundedCornerShape(12.dp))
+            .background(dotColor.copy(alpha = 0.12f), shape = RoundedCornerShape(16.dp))
+            .border(1.dp, dotColor.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
             .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(dotColor)
-        )
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(12.dp)) {
+            if (status is EngineStatus.Connected) {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(dotColor.copy(alpha = 0.3f))
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(dotColor)
+            )
+        }
         Spacer(modifier = Modifier.width(6.dp))
         Text(
             label,
@@ -386,52 +1041,23 @@ fun StatusPill(status: EngineStatus) {
 }
 
 @Composable
-fun ActiveTransferCard(transfer: TransferItem, onCancel: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = if (transfer.isIncoming) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
-                    contentDescription = null,
-                    tint = if (transfer.isIncoming) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(transfer.fileName, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        if (transfer.isIncoming) "From ${transfer.peerName}" else "To ${transfer.peerName}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                IconButton(onClick = onCancel) {
-                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = MaterialTheme.colorScheme.error)
-                }
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-            LinearProgressIndicator(
-                progress = { transfer.progress },
+fun GlowingHaloDot(online: Boolean, isTransferring: Boolean = false) {
+    val dotColor = if (isTransferring) FrostIceBlue else if (online) FrostEmerald else FrostSlate600
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(14.dp)) {
+        if (online || isTransferring) {
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(dotColor.copy(alpha = 0.3f))
             )
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("${(transfer.progress * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                val transferredMb = transfer.bytesTransferred.toDouble() / (1024 * 1024)
-                val totalMb = transfer.totalBytes.toDouble() / (1024 * 1024)
-                Text(
-                    String.format("%.1f / %.1f MB", transferredMb, totalMb),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
         }
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(dotColor)
+        )
     }
 }
 
@@ -439,63 +1065,246 @@ fun ActiveTransferCard(transfer: TransferItem, onCancel: () -> Unit) {
 fun PeerCard(
     peer: PeerItem,
     hasStagedFile: Boolean,
-    onSend: () -> Unit
+    transferItem: TransferItem?,
+    onSend: () -> Unit,
+    onCancelTransfer: () -> Unit
 ) {
+    val isTransferring = transferItem != null
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isTransferring) FrostSlate800 else GlassCardBg
+        ),
+        border = BorderStroke(
+            1.dp,
+            if (isTransferring) FrostIceBlue.copy(alpha = 0.5f)
+            else if (peer.online) GlassBorder
+            else GlassBorderMuted
+        )
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(16.dp)
         ) {
-            Icon(
-                imageVector = when (peer.os.lowercase()) {
-                    "darwin", "macos", "ios" -> Icons.Default.Laptop
-                    "android" -> Icons.Default.Smartphone
-                    else -> Icons.Default.Computer
-                },
-                contentDescription = null,
-                modifier = Modifier.size(26.dp),
-                tint = if (peer.online) MaterialTheme.colorScheme.primary else Color.Gray
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    peer.displayName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(if (peer.online) Color(0xFF4CAF50) else Color.Gray)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (peer.online) FrostIceBlue.copy(alpha = 0.12f)
+                            else FrostSlate700.copy(alpha = 0.4f)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = when (peer.os.lowercase()) {
+                            "darwin", "macos", "ios" -> Icons.Default.Laptop
+                            "android" -> Icons.Default.Smartphone
+                            else -> Icons.Default.Computer
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = if (peer.online) FrostIceBlue else FrostSlate400
                     )
-                    Spacer(modifier = Modifier.width(5.dp))
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        if (peer.online) "Connected" else "Offline",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (peer.online) Color(0xFF4CAF50) else Color.Gray,
-                        fontWeight = FontWeight.Medium
+                        peer.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = FrostSlate100,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        GlowingHaloDot(online = peer.online, isTransferring = isTransferring)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        val statusLabel = if (isTransferring && transferItem != null) {
+                            if (transferItem.isIncoming) "Receiving file" else "Sending file"
+                        } else {
+                            if (peer.online) "Connected" else "Offline"
+                        }
+                        val statusTextColor = if (isTransferring) FrostIceBlue else if (peer.online) FrostEmerald else FrostSlate400
+                        Text(
+                            statusLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = statusTextColor,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                if (isTransferring) {
+                    IconButton(
+                        onClick = onCancelTransfer,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel",
+                            tint = FrostRose,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = onSend,
+                        enabled = peer.online && hasStagedFile,
+                        modifier = Modifier.height(38.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = FrostIceBlue,
+                            contentColor = FrostSlate950,
+                            disabledContainerColor = FrostSlate700.copy(alpha = 0.4f),
+                            disabledContentColor = FrostSlate600
+                        ),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp)
+                    ) {
+                        Text("Send", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+            }
+
+            // In-Place Inline Progress Bar
+            val active = transferItem
+            if (active != null) {
+                Spacer(modifier = Modifier.height(14.dp))
+                if (active.isBatch && active.currentFileName.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "File ${active.fileIndex} of ${active.totalFiles}: ${active.currentFileName}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = FrostSlate100,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                LinearProgressIndicator(
+                    progress = { active.progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = FrostIceBlue,
+                    trackColor = FrostSlate700
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "${(active.progress * 100).toInt()}% • ${active.fileName}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = FrostSlate400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    val transferredMb = active.bytesTransferred.toDouble() / (1024 * 1024)
+                    val totalMb = active.totalBytes.toDouble() / (1024 * 1024)
+                    Text(
+                        String.format("%.1f / %.1f MB", transferredMb, totalMb),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = FrostIceBlue
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(10.dp))
-            Button(
-                onClick = onSend,
-                enabled = peer.online && hasStagedFile,
-                shape = RoundedCornerShape(10.dp),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
-            ) {
-                Text("Send", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun ActiveTransferCard(transfer: TransferItem, onCancel: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = FrostSlate800),
+        border = BorderStroke(1.dp, FrostIceBlue.copy(alpha = 0.4f))
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = if (transfer.isIncoming) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                    contentDescription = null,
+                    tint = if (transfer.isIncoming) FrostEmerald else FrostIceBlue,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        transfer.fileName,
+                        fontWeight = FontWeight.Bold,
+                        color = FrostSlate100,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        if (transfer.isIncoming) "From ${transfer.peerName}" else "To ${transfer.peerName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = FrostSlate400
+                    )
+                }
+                IconButton(onClick = onCancel) {
+                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = FrostRose)
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            if (transfer.isBatch && transfer.currentFileName.isNotEmpty()) {
+                Text(
+                    "File ${transfer.fileIndex} of ${transfer.totalFiles}: ${transfer.currentFileName}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = FrostSlate100,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+            LinearProgressIndicator(
+                progress = { transfer.progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                color = FrostIceBlue,
+                trackColor = FrostSlate700
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    "${(transfer.progress * 100).toInt()}%",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = FrostIceBlue
+                )
+                val transferredMb = transfer.bytesTransferred.toDouble() / (1024 * 1024)
+                val totalMb = transfer.totalBytes.toDouble() / (1024 * 1024)
+                Text(
+                    String.format("%.1f / %.1f MB", transferredMb, totalMb),
+                    fontSize = 12.sp,
+                    color = FrostSlate400
+                )
             }
         }
     }
@@ -503,37 +1312,72 @@ fun PeerCard(
 
 @Composable
 fun RecentTransferRow(transfer: TransferItem) {
+    val context = LocalContext.current
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = GlassCardBg),
+        border = BorderStroke(1.dp, GlassBorderMuted)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(10.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 imageVector = if (transfer.isSuccess) Icons.Default.CheckCircle else Icons.Default.Cancel,
                 contentDescription = null,
-                tint = if (transfer.isSuccess) Color(0xFF4CAF50) else Color(0xFFE53935),
+                tint = if (transfer.isSuccess) FrostEmerald else FrostRose,
                 modifier = Modifier.size(18.dp)
             )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                transfer.fileName,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                if (transfer.isSuccess) "Done" else "Failed",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (transfer.isSuccess) Color(0xFF4CAF50) else Color(0xFFE53935),
-                fontWeight = FontWeight.Bold
-            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    transfer.fileName,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = FrostSlate100
+                )
+                Text(
+                    if (transfer.isIncoming) "Received" else "Sent",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = FrostSlate400
+                )
+            }
+            if (transfer.isSuccess && transfer.isIncoming && transfer.fileUri != null) {
+                Button(
+                    onClick = {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(transfer.fileUri, context.contentResolver.getType(transfer.fileUri) ?: "*/*")
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            }
+                            context.startActivity(intent)
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "No app to open file", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = FrostIceBlue.copy(alpha = 0.15f),
+                        contentColor = FrostIceBlue
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text("Open", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                }
+            } else {
+                Text(
+                    if (transfer.isSuccess) "Done" else "Failed",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (transfer.isSuccess) FrostEmerald else FrostRose,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }

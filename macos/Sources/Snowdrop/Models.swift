@@ -21,12 +21,24 @@ public enum EngineStatus: Equatable {
 public struct PeerItem: Identifiable, Codable, Hashable {
     public let id: String
     public let hostName: String
+    public let customDisplayName: String?
     public let dnsName: String
     public let os: String
     public let ipAddresses: [String]
     public let online: Bool
 
+    enum CodingKeys: String, CodingKey {
+        case id
+        case hostName
+        case customDisplayName = "displayName"
+        case dnsName
+        case os
+        case ipAddresses
+        case online
+    }
+
     public var displayName: String {
+        if let d = customDisplayName, !d.isEmpty { return d }
         if !hostName.isEmpty { return hostName }
         if !dnsName.isEmpty { return dnsName }
         return id
@@ -67,6 +79,50 @@ public struct TransferItem: Identifiable, Equatable {
     public var isSuccess: Bool
     public var errorMessage: String?
     public var startTime: Date
+    public var isBatch: Bool = false
+    public var fileIndex: Int = 1
+    public var totalFiles: Int = 1
+    public var currentFileName: String = ""
+    public var currentFileBytes: Int64 = 0
+    public var currentFileTotal: Int64 = 0
+
+    public init(
+        id: String,
+        fileName: String,
+        peerName: String,
+        direction: TransferDirection,
+        bytesTransferred: Int64,
+        totalBytes: Int64,
+        speedBytesPerSec: Double,
+        isCompleted: Bool,
+        isSuccess: Bool,
+        errorMessage: String? = nil,
+        startTime: Date = Date(),
+        isBatch: Bool = false,
+        fileIndex: Int = 1,
+        totalFiles: Int = 1,
+        currentFileName: String = "",
+        currentFileBytes: Int64 = 0,
+        currentFileTotal: Int64 = 0
+    ) {
+        self.id = id
+        self.fileName = fileName
+        self.peerName = peerName
+        self.direction = direction
+        self.bytesTransferred = bytesTransferred
+        self.totalBytes = totalBytes
+        self.speedBytesPerSec = speedBytesPerSec
+        self.isCompleted = isCompleted
+        self.isSuccess = isSuccess
+        self.errorMessage = errorMessage
+        self.startTime = startTime
+        self.isBatch = isBatch
+        self.fileIndex = fileIndex
+        self.totalFiles = totalFiles
+        self.currentFileName = currentFileName
+        self.currentFileBytes = currentFileBytes
+        self.currentFileTotal = currentFileTotal
+    }
 
     public var progress: Double {
         guard totalBytes > 0 else { return 0 }
