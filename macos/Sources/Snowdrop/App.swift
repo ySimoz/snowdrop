@@ -214,9 +214,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             if url.scheme == "snowdrop" {
-                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                   components.host == "send",
-                   let path = components.queryItems?.first(where: { $0.name == "path" })?.value {
+                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+                    if components.host == "test-notif" {
+                        SnowdropEngine.shared.handleIncomingApproval(
+                            transferID: "test-\(UUID().uuidString.prefix(6))",
+                            nodeID: "test-node",
+                            senderName: "Pixel Phone",
+                            fileName: "holiday_photo.jpg",
+                            fileSize: 4500000
+                        )
+                        continue
+                    }
+                    if components.host == "send",
+                       let path = components.queryItems?.first(where: { $0.name == "path" })?.value {
                     let fileURL = URL(fileURLWithPath: path).standardizedFileURL
                     var isDir: ObjCBool = false
                     if FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDir), !isDir.boolValue {
@@ -233,6 +243,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                         }
                     }
                 }
+            }
             } else {
                 SnowdropEngine.shared.stageFile(url)
                 StatusItemManager.shared.showPopover()

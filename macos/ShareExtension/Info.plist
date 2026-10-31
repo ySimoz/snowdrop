@@ -9,8 +9,6 @@
     <key>CFBundleDisplayName</key>
     <string>Snowdrop</string>
     <key>CFBundleIconFile</key>
-    <string>AppIcon.icns</string>
-    <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>SnowdropShare</string>

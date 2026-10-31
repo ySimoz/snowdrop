@@ -25,6 +25,7 @@ cp "$DIR/Info.plist" "$APP_DIR/Contents/Info.plist"
 if [ -d "$DIR/Resources" ]; then
     cp -r "$DIR/Resources/"* "$APP_DIR/Contents/Resources/"
     cp "$DIR/Resources/AppIcon.icns" "$APP_DIR/Contents/PlugIns/SnowdropShare.appex/Contents/Resources/AppIcon.icns"
+    cp "$DIR/Resources/AppIcon.png" "$APP_DIR/Contents/PlugIns/SnowdropShare.appex/Contents/Resources/AppIcon.png" 2>/dev/null || true
 fi
 
 echo "==> Building macOS Share Extension..."

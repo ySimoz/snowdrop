@@ -11,10 +11,12 @@ class ShareViewController: NSViewController {
 
         let iconView = NSImageView()
         let extBundle = Bundle(for: ShareViewController.self)
-        let loadedIcon = extBundle.image(forResource: "AppIcon")
+        let loadedIcon = (extBundle.url(forResource: "AppIcon", withExtension: "png").flatMap { NSImage(contentsOf: $0) })
             ?? (extBundle.url(forResource: "AppIcon", withExtension: "icns").flatMap { NSImage(contentsOf: $0) })
+            ?? extBundle.image(forResource: "AppIcon")
             ?? NSImage(named: "AppIcon")
-        iconView.image = loadedIcon ?? NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
+            ?? NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
+        iconView.image = loadedIcon
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
 

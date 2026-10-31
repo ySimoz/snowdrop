@@ -555,6 +555,14 @@ public final class SnowdropEngine: ObservableObject {
             content.categoryIdentifier = "TRANSFER_APPROVAL"
             content.userInfo = ["transferID": transferID]
 
+            if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "png") {
+                let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("SnowdropNotif_\(UUID().uuidString).png")
+                if (try? FileManager.default.copyItem(at: iconURL, to: tmpURL)) != nil,
+                   let attachment = try? UNNotificationAttachment(identifier: "SnowdropLogo", url: tmpURL, options: nil) {
+                    content.attachments = [attachment]
+                }
+            }
+
             let notifReq = UNNotificationRequest(identifier: transferID, content: content, trigger: nil)
             UNUserNotificationCenter.current().add(notifReq, withCompletionHandler: nil)
         }
@@ -623,6 +631,14 @@ public final class SnowdropEngine: ObservableObject {
         content.title = title
         content.body = body
         content.sound = .default
+
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "png") {
+            let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("SnowdropNotif_\(UUID().uuidString).png")
+            if (try? FileManager.default.copyItem(at: iconURL, to: tmpURL)) != nil,
+               let attachment = try? UNNotificationAttachment(identifier: "SnowdropLogo", url: tmpURL, options: nil) {
+                content.attachments = [attachment]
+            }
+        }
 
         let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
