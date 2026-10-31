@@ -35,10 +35,15 @@ swiftc -target arm64-apple-macosx13.0 \
     -o "$APP_DIR/Contents/PlugIns/SnowdropShare.appex/Contents/MacOS/SnowdropShare"
 
 cp "$DIR/ShareExtension/Info.plist" "$APP_DIR/Contents/PlugIns/SnowdropShare.appex/Contents/Info.plist"
+echo "APPL????" > "$APP_DIR/Contents/PkgInfo"
+echo "XPC!????" > "$APP_DIR/Contents/PlugIns/SnowdropShare.appex/Contents/PkgInfo"
 
 echo "==> Ad-hoc signing bundles..."
 codesign -s - --force --entitlements "$DIR/ShareExtension/ShareExtension.entitlements" "$APP_DIR/Contents/PlugIns/SnowdropShare.appex"
 codesign -s - --force "$APP_DIR"
+
+touch "$APP_DIR"
+touch "$APP_DIR/Contents/PlugIns/SnowdropShare.appex"
 
 echo "==> Registering with LaunchServices and pluginkit..."
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_DIR" 2>/dev/null || true

@@ -9,7 +9,11 @@
     <key>CFBundleDisplayName</key>
     <string>Snowdrop</string>
     <key>CFBundleIconFile</key>
+    <string>AppIcon.icns</string>
+    <key>CFBundleIconName</key>
     <string>AppIcon</string>
+    <key>NSUserNotificationAlertStyle</key>
+    <string>alert</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

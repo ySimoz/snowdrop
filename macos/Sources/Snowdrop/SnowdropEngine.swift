@@ -605,12 +605,12 @@ public final class SnowdropEngine: ObservableObject {
 
     private func setupNotifications() {
         let acceptAction = UNNotificationAction(identifier: "ACTION_ACCEPT", title: "Accept", options: [.foreground])
-        let trustAction = UNNotificationAction(identifier: "ACTION_TRUST", title: "Always Trust", options: [])
         let declineAction = UNNotificationAction(identifier: "ACTION_DECLINE", title: "Decline", options: [.destructive])
 
+        // Exactly 2 actions allows macOS to render direct buttons without an "Options" overflow dropdown
         let category = UNNotificationCategory(
             identifier: "TRANSFER_APPROVAL",
-            actions: [acceptAction, trustAction, declineAction],
+            actions: [declineAction, acceptAction],
             intentIdentifiers: [],
             options: []
         )
