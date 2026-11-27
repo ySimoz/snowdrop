@@ -37,15 +37,15 @@
 - 🛡️ **Auto-Accept for Trusted Devices**: Add your laptop or phone to your trusted circle. Incoming transfers download silently in the background without nagging popups.
 - 🔒 **Zero-Cloud, Absolute Privacy**: Direct device-to-device streaming encrypted with WireGuard. No intermediate cloud servers ever see or store your files.
 - 🖥️ **Native Everywhere**: 
-  - **macOS**: Lightweight menu bar popover and Finder Share Extension.
-  - **Android**: Modern Jetpack Compose UI with background notification service and system Share Sheet support.
-- 📋 **Transfer History**: Clean, one-click clearable session history for sent and received files.
+  - **macOS**: Menu-bar-first SwiftUI app (macOS 26+, Liquid Glass), standalone Settings, optional full window, Finder Share Extension, and Services.
+  - **Android**: Jetpack Compose Material 3 app (Light & Dark, Two-Layer Liquid Glass chrome via Haze), Android 15 Foreground Service, and multi-file Share Sheet.
+- 📋 **Transfer History**: Swipable / clearable session history with direct file reveal (`Show in Finder` on macOS, safe `MediaStore`/`FileProvider` open on Android).
 
 ---
 
 ## Quick Start
 
-1. **Download**: Grab `Snowdrop-v0.10.0-macos.zip` for Mac and `Snowdrop-v0.10.0-android.apk` for Android from [Releases](https://github.com/ySimoz/snowdrop/releases/latest).
+1. **Download**: Grab `Snowdrop-v0.2.0-macos.zip` for Mac and `Snowdrop-v0.2.0-android.apk` for Android from [Releases](https://github.com/ySimoz/snowdrop/releases/latest).
 2. **One-Time Sign In**: Open Snowdrop on both devices. On first launch, tap **Sign In** to link them with your account (Google, Apple, or GitHub). No separate VPN app or setup needed; credentials persist automatically across launches.
 3. **Send**: Pick your files, choose your target device, and tap **Send**.
 
@@ -66,12 +66,12 @@ For developers and security engineers interested in how Snowdrop achieves zero-c
                    +--------------------+--------------------+
                    |                                         |
 +------------------v------------------+   +------------------v------------------+
-|           macOS Client              |   |          Android Client             |
+|        macOS Client (macos-next)    |   |      Android Client (android-next)  |
 |                                     |   |                                     |
-|  • SwiftUI Menu Bar App             |   |  • Jetpack Compose Material 3 UI    |
-|  • Native Share Extension           |   |  • System Share Sheet Target        |
-|  • C-Archive Bridge (libsnowdrop)   |   |  • JNI Bindings (core.aar)          |
-|  • Real-time Transfer Cards         |   |  • Foreground Transfer Service      |
+|  • SwiftUI 6 + Liquid Glass         |   |  • Jetpack Compose + Haze Glass     |
+|  • App Sandbox + Hardened Runtime   |   |  • Android 15 FGS & Share Target    |
+|  • Actor-Isolated Bridge (snowdrop) |   |  • 16 KB Aligned JNI Lib (core.aar) |
+|  • Multi-File Share Extension       |   |  • Scoped MediaStore / SAF Storage  |
 +-------------------------------------+   +-------------------------------------+
 ```
 
@@ -93,7 +93,8 @@ Transfers utilize chunked HTTP streaming over the userspace WireGuard mesh with 
 - **Path Traversal Protection**: All inbound filenames are strictly sanitized, stripping directory traversal tokens (`..`), null bytes (`\x00`), and control characters (CWE-22). Fuzz-tested with 100,000+ test iterations.
 - **Safe File Permissions**: Incoming files are created with restricted permissions (`0600`) to prevent local unauthorized access.
 - **Timing-Attack Resistance**: Authentication tokens are evaluated using `crypto/subtle.ConstantTimeCompare` (CWE-208).
-- **DoS Safeguards**: Manifest endpoints enforce request body size limits (`http.MaxBytesReader`) and bounded file conflict iteration loops.
+- **DoS Safeguards**: Manifest endpoints enforce request body size limits (`http.MaxBytesReader`), expired session pruning, and bounded file conflict loops.
+- **Platform Sandboxing**: macOS enforces App Sandbox, Hardened Runtime, and symlink-resolved sensitive-path checks (`FilePathValidator`); Android enforces `allowBackup="false"`, `FileProvider` URIs, atomic `MediaStore` `IS_PENDING` writes, and 16 KB ELF page alignment.
 
 ---
 
@@ -101,28 +102,32 @@ Transfers utilize chunked HTTP streaming over the userspace WireGuard mesh with 
 
 ### Prerequisites
 
-- **Go**: 1.22+ with `gomobile` installed
-- **macOS**: macOS 13 (Ventura) or newer, Xcode Command Line Tools
-- **Android**: Android Studio / SDK (API 34) & NDK (r25c or r26)
+- **Go**: 1.27+ with `gomobile` / `gobind`
+- **macOS**: macOS 26+ with Xcode and `xcodegen`
+- **Android**: JDK 17, Android SDK (API 35), and NDK r27 (`27.3.13750724`)
 
-### macOS App
+### macOS App (`macos-next`)
 
 ```bash
-./macos/build.sh
-# Output: macos/dist/Snowdrop.app
+./macos-next/scripts/build_core.sh
+./macos-next/scripts/install_local.sh
+# Installs signed Snowdrop.app to /Applications/Snowdrop.app
 ```
 
-### Android App
+### Android App (`android-next`)
 
 ```bash
-./android/build.sh
-# Output: android/app/build/outputs/apk/debug/app-debug.apk
+./android-next/scripts/build_core.sh
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./android-next/gradlew -p android-next assembleDebug
+# Output: android-next/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ### Run Tests
 
 ```bash
-go test -v ./core
+go test -race -v ./core
+swift test --package-path macos-next
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./android-next/gradlew -p android-next testDebugUnitTest
 ```
 
 ---

@@ -14,6 +14,8 @@ typedef void (*ProgressCallback)(const char* transferID, int64_t current, int64_
 typedef void (*TransferCompleteCallback)(const char* transferID, bool success, const char* errorMsg);
 typedef void (*ApprovalCallback)(const char* transferID, const char* nodeID, const char* senderName, const char* fileName, int64_t fileSize);
 typedef void (*BatchProgressCallback)(const char* batchID, int fileIndex, int totalFiles, const char* fileName, int64_t fileCur, int64_t fileTotal, int64_t batchCur, int64_t batchTotal);
+typedef void (*BatchFileReceivedCallback)(const char* batchID, int fileIndex, int totalFiles, const char* fileName, const char* filePath);
+typedef void (*ApprovalDismissedCallback)(const char* transferID, const char* reason);
 
 static void callStatusCb(StatusCallback cb, int status, const char* msg) {
     if (cb) cb(status, msg);
@@ -36,6 +38,12 @@ static void callApprovalCb(ApprovalCallback cb, const char* id, const char* node
 static void callBatchProgressCb(BatchProgressCallback cb, const char* id, int idx, int total, const char* name, int64_t fCur, int64_t fTotal, int64_t bCur, int64_t bTotal) {
     if (cb) cb(id, idx, total, name, fCur, fTotal, bCur, bTotal);
 }
+static void callBatchFileReceivedCb(BatchFileReceivedCallback cb, const char* id, int idx, int total, const char* name, const char* path) {
+    if (cb) cb(id, idx, total, name, path);
+}
+static void callApprovalDismissedCb(ApprovalDismissedCallback cb, const char* id, const char* reason) {
+    if (cb) cb(id, reason);
+}
 */
 import "C"
 import (
@@ -43,21 +51,24 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/username/snowdrop/core"
 )
 
 var (
-	darwinMu           sync.Mutex
-	activeEngine       *core.Engine
-	cbStatus           C.StatusCallback
-	cbAuthRequired     C.AuthRequiredCallback
-	cbPeersUpdated     C.PeersUpdatedCallback
-	cbProgress         C.ProgressCallback
-	cbTransferComplete C.TransferCompleteCallback
-	cbApproval         C.ApprovalCallback
-	cbBatchProgress    C.BatchProgressCallback
+	darwinMu            sync.Mutex
+	activeEngine        *core.Engine
+	cbStatus            C.StatusCallback
+	cbAuthRequired      C.AuthRequiredCallback
+	cbPeersUpdated      C.PeersUpdatedCallback
+	cbProgress          C.ProgressCallback
+	cbTransferComplete  C.TransferCompleteCallback
+	cbApproval          C.ApprovalCallback
+	cbBatchProgress     C.BatchProgressCallback
+	cbBatchFileReceived C.BatchFileReceivedCallback
+	cbApprovalDismissed C.ApprovalDismissedCallback
 )
 
 //export RegisterCallbacks
@@ -89,6 +100,33 @@ func RegisterBatchProgressCallback(batchProgressCb C.BatchProgressCallback) {
 	darwinMu.Lock()
 	defer darwinMu.Unlock()
 	cbBatchProgress = batchProgressCb
+}
+
+//export RegisterBatchFileReceivedCallback
+func RegisterBatchFileReceivedCallback(batchFileReceivedCb C.BatchFileReceivedCallback) {
+	darwinMu.Lock()
+	defer darwinMu.Unlock()
+	cbBatchFileReceived = batchFileReceivedCb
+}
+
+//export RegisterApprovalDismissedCallback
+func RegisterApprovalDismissedCallback(approvalDismissedCb C.ApprovalDismissedCallback) {
+	darwinMu.Lock()
+	defer darwinMu.Unlock()
+	cbApprovalDismissed = approvalDismissedCb
+}
+
+func emitTransferComplete(id string, ok bool, errMsg string) {
+	darwinMu.Lock()
+	cb := cbTransferComplete
+	darwinMu.Unlock()
+	if cb != nil {
+		cID := C.CString(id)
+		defer C.free(unsafe.Pointer(cID))
+		cErr := C.CString(errMsg)
+		defer C.free(unsafe.Pointer(cErr))
+		C.callTransferCompleteCb(cb, cID, C.bool(ok), cErr)
+	}
 }
 
 //export StartEngine
@@ -149,16 +187,7 @@ func StartEngine(dataDir *C.char, downloadDir *C.char, deviceName *C.char) C.int
 			}
 		},
 		OnTransferComplete: func(transferID string, success bool, errorMsg string) {
-			darwinMu.Lock()
-			cb := cbTransferComplete
-			darwinMu.Unlock()
-			if cb != nil {
-				cID := C.CString(transferID)
-				defer C.free(unsafe.Pointer(cID))
-				cErr := C.CString(errorMsg)
-				defer C.free(unsafe.Pointer(cErr))
-				C.callTransferCompleteCb(cb, cID, C.bool(success), cErr)
-			}
+			emitTransferComplete(transferID, success, errorMsg)
 		},
 		RequireApproval:   true,
 		AutoAcceptTrusted: true,
@@ -190,6 +219,32 @@ func StartEngine(dataDir *C.char, downloadDir *C.char, deviceName *C.char) C.int
 				C.callBatchProgressCb(cb, cID, C.int(fileIndex), C.int(totalFiles), cName, C.int64_t(fileBytes), C.int64_t(fileTotal), C.int64_t(batchBytes), C.int64_t(batchTotal))
 			}
 		},
+		OnBatchFileReceived: func(batchID string, fileIndex int, totalFiles int, fileName string, filePath string) {
+			darwinMu.Lock()
+			cb := cbBatchFileReceived
+			darwinMu.Unlock()
+			if cb != nil {
+				cID := C.CString(batchID)
+				defer C.free(unsafe.Pointer(cID))
+				cName := C.CString(fileName)
+				defer C.free(unsafe.Pointer(cName))
+				cPath := C.CString(filePath)
+				defer C.free(unsafe.Pointer(cPath))
+				C.callBatchFileReceivedCb(cb, cID, C.int(fileIndex), C.int(totalFiles), cName, cPath)
+			}
+		},
+		OnApprovalDismissed: func(transferID string, reason string) {
+			darwinMu.Lock()
+			cb := cbApprovalDismissed
+			darwinMu.Unlock()
+			if cb != nil {
+				cID := C.CString(transferID)
+				defer C.free(unsafe.Pointer(cID))
+				cReason := C.CString(reason)
+				defer C.free(unsafe.Pointer(cReason))
+				C.callApprovalDismissedCb(cb, cID, cReason)
+			}
+		},
 	}
 
 	eng, err := core.NewEngine(cfg)
@@ -215,7 +270,7 @@ func StopEngine() {
 	darwinMu.Unlock()
 
 	if eng != nil {
-		eng.Stop()
+		eng.StopAndWait(3 * time.Second)
 	}
 }
 
@@ -229,11 +284,14 @@ func SendFile(peerIP *C.char, filePath *C.char, transferID *C.char) {
 	eng := activeEngine
 	darwinMu.Unlock()
 
-	if eng != nil {
-		go func() {
-			_ = eng.SendFile(pIP, fPath, tID)
-		}()
+	if eng == nil {
+		emitTransferComplete(tID, false, "engine not started")
+		return
 	}
+
+	go func() {
+		_ = eng.SendFile(pIP, fPath, tID)
+	}()
 }
 
 type darwinBatchItem struct {
@@ -252,33 +310,40 @@ func SendBatch(peerIP *C.char, batchID *C.char, filesJSON *C.char) {
 	eng := activeEngine
 	darwinMu.Unlock()
 
-	if eng != nil {
-		go func() {
-			var items []darwinBatchItem
-			if err := json.Unmarshal([]byte(fJSON), &items); err != nil {
-				eng.CancelTransfer(bID)
-				return
-			}
-
-			var sources []core.BatchSendSource
-			for i, it := range items {
-				size := it.Size
-				if size <= 0 {
-					if fi, err := os.Stat(it.Path); err == nil {
-						size = fi.Size()
-					}
-				}
-				sources = append(sources, core.BatchSendSource{
-					FileID:   fmt.Sprintf("f-%d", i+1),
-					FileName: it.Name,
-					FileSize: size,
-					FilePath: it.Path,
-				})
-			}
-
-			_ = eng.SendBatch(pIP, bID, sources)
-		}()
+	if eng == nil {
+		emitTransferComplete(bID, false, "engine not started")
+		return
 	}
+
+	go func() {
+		var items []darwinBatchItem
+		if err := json.Unmarshal([]byte(fJSON), &items); err != nil {
+			eng.NotifyTransferComplete(bID, false, fmt.Sprintf("invalid batch json: %v", err))
+			return
+		}
+		if len(items) == 0 {
+			eng.NotifyTransferComplete(bID, false, "empty batch")
+			return
+		}
+
+		var sources []core.BatchSendSource
+		for i, it := range items {
+			size := it.Size
+			if size <= 0 {
+				if fi, err := os.Stat(it.Path); err == nil {
+					size = fi.Size()
+				}
+			}
+			sources = append(sources, core.BatchSendSource{
+				FileID:   fmt.Sprintf("f-%d", i+1),
+				FileName: it.Name,
+				FileSize: size,
+				FilePath: it.Path,
+			})
+		}
+
+		_ = eng.SendBatch(pIP, bID, sources)
+	}()
 }
 
 //export CancelTransfer
@@ -320,6 +385,13 @@ func GetTrustedPeers() *C.char {
 	return C.CString("[]")
 }
 
+//export FreeCString
+func FreeCString(ptr *C.char) {
+	if ptr != nil {
+		C.free(unsafe.Pointer(ptr))
+	}
+}
+
 //export RevokeTrusted
 func RevokeTrusted(nodeID *C.char) C.bool {
 	nID := C.GoString(nodeID)
@@ -343,6 +415,20 @@ func SetApprovalConfig(requireApproval C.bool, autoAcceptTrusted C.bool) {
 	if eng != nil {
 		eng.SetApprovalConfig(bool(requireApproval), bool(autoAcceptTrusted))
 	}
+}
+
+//export SetDownloadDir
+func SetDownloadDir(downloadDir *C.char) C.bool {
+	dir := C.GoString(downloadDir)
+
+	darwinMu.Lock()
+	eng := activeEngine
+	darwinMu.Unlock()
+
+	if eng != nil {
+		return C.bool(eng.SetDownloadDir(dir) == nil)
+	}
+	return false
 }
 
 //export SnowdropSignOut

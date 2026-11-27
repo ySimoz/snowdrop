@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/wlynxg/anet"
 	"tailscale.com/net/netmon"
@@ -54,6 +55,7 @@ type AndroidCallback interface {
 	OnProgress(transferId string, current int64, total int64)
 	OnTransferComplete(transferId string, success bool, errorMsg string)
 	OnIncomingApproval(transferId string, senderNodeId string, senderName string, fileName string, fileSize int64)
+	OnApprovalDismissed(transferId string, reason string)
 	OnBatchProgress(batchId string, fileIndex int, totalFiles int, fileName string, fileCurrent int64, fileTotal int64, batchCurrent int64, batchTotal int64)
 	OnBatchFileComplete(batchId string, fileIndex int, totalFiles int, fileName string, filePath string)
 }
@@ -66,11 +68,11 @@ var (
 // StartAndroidEngine initializes and starts the core engine on Android
 func StartAndroidEngine(dataDir string, downloadDir string, deviceName string, cb AndroidCallback) error {
 	androidMu.Lock()
+	defer androidMu.Unlock()
+
 	if androidEngine != nil {
-		androidMu.Unlock()
 		return nil
 	}
-	androidMu.Unlock()
 
 	cfg := &EngineConfig{
 		DataDir:     dataDir,
@@ -108,6 +110,11 @@ func StartAndroidEngine(dataDir string, downloadDir string, deviceName string, c
 				cb.OnIncomingApproval(transferID, senderNodeID, senderName, fileName, sizeBytes)
 			}
 		},
+		OnApprovalDismissed: func(transferID string, reason string) {
+			if cb != nil {
+				cb.OnApprovalDismissed(transferID, reason)
+			}
+		},
 		OnBatchProgress: func(batchID string, fileIndex int, totalFiles int, fileName string, fileBytes int64, fileTotal int64, batchBytes int64, batchTotal int64) {
 			if cb != nil {
 				cb.OnBatchProgress(batchID, fileIndex, totalFiles, fileName, fileBytes, fileTotal, batchBytes, batchTotal)
@@ -129,9 +136,7 @@ func StartAndroidEngine(dataDir string, downloadDir string, deviceName string, c
 		return err
 	}
 
-	androidMu.Lock()
 	androidEngine = eng
-	androidMu.Unlock()
 	return nil
 }
 
@@ -140,10 +145,10 @@ func StopAndroidEngine() {
 	androidMu.Lock()
 	eng := androidEngine
 	androidEngine = nil
-	androidMu.Unlock()
+	defer androidMu.Unlock()
 
 	if eng != nil {
-		eng.Stop()
+		eng.StopAndWait(3 * time.Second)
 	}
 }
 
@@ -154,6 +159,9 @@ func SendFileToPeer(peerIP string, fileDescriptor int, fileName string, fileSize
 	androidMu.Unlock()
 
 	if eng == nil {
+		if f := os.NewFile(uintptr(fileDescriptor), fileName); f != nil {
+			_ = f.Close()
+		}
 		return
 	}
 
@@ -211,18 +219,38 @@ type androidBatchItem struct {
 
 // SendBatchToPeer sends multiple files via Android file descriptors
 func SendBatchToPeer(peerIP string, batchID string, filesJSON string) {
+	var items []androidBatchItem
+	parseErr := json.Unmarshal([]byte(filesJSON), &items)
+
 	androidMu.Lock()
 	eng := androidEngine
 	androidMu.Unlock()
 
 	if eng == nil {
+		for _, it := range items {
+			if f := os.NewFile(uintptr(it.FD), it.Name); f != nil {
+				_ = f.Close()
+			}
+		}
 		return
 	}
 
 	go func() {
-		var items []androidBatchItem
-		if err := json.Unmarshal([]byte(filesJSON), &items); err != nil {
-			eng.transfers.notifyComplete(batchID, false, fmt.Sprintf("invalid batch json: %v", err))
+		var filesToClose []*os.File
+		defer func() {
+			for _, f := range filesToClose {
+				_ = f.Close()
+			}
+		}()
+
+		for _, it := range items {
+			if f := os.NewFile(uintptr(it.FD), it.Name); f != nil {
+				filesToClose = append(filesToClose, f)
+			}
+		}
+
+		if parseErr != nil {
+			eng.transfers.notifyComplete(batchID, false, fmt.Sprintf("invalid batch json: %v", parseErr))
 			return
 		}
 
@@ -232,21 +260,12 @@ func SendBatchToPeer(peerIP string, batchID string, filesJSON string) {
 		}
 
 		var sources []BatchSendSource
-		var filesToClose []*os.File
-
-		defer func() {
-			for _, f := range filesToClose {
-				_ = f.Close()
-			}
-		}()
-
 		for i, it := range items {
-			file := os.NewFile(uintptr(it.FD), it.Name)
-			if file == nil {
+			if i >= len(filesToClose) {
 				eng.transfers.notifyComplete(batchID, false, fmt.Sprintf("invalid fd for %s", it.Name))
 				return
 			}
-			filesToClose = append(filesToClose, file)
+			file := filesToClose[i]
 
 			hasher := sha256.New()
 			buf := make([]byte, BufferSize)

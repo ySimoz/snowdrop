@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,7 @@ type Engine struct {
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
 	mu          sync.Mutex
+	tsStartDone chan struct{}
 	status      int
 	authURL     string
 	lastPeers   string
@@ -79,9 +81,11 @@ func (e *Engine) Start() error {
 	}
 
 	_ = os.Setenv("TS_LOGS_DIR", e.config.DataDir)
-	_ = os.Setenv("TMPDIR", e.config.DataDir)
-	if os.Getenv("HOME") == "" {
-		_ = os.Setenv("HOME", e.config.DataDir)
+	if runtime.GOOS != "darwin" {
+		_ = os.Setenv("TMPDIR", e.config.DataDir)
+		if os.Getenv("HOME") == "" {
+			_ = os.Setenv("HOME", e.config.DataDir)
+		}
 	}
 
 	sanitizedName := sanitizeHostname(e.config.DeviceName)
@@ -107,6 +111,7 @@ func (e *Engine) Start() error {
 		},
 	}
 	e.status = StatusConnecting
+	e.tsStartDone = make(chan struct{})
 	e.mu.Unlock()
 
 	e.wg.Add(2)
@@ -122,8 +127,18 @@ func (e *Engine) Start() error {
 func (e *Engine) runServer(serverHostname string) {
 	defer e.wg.Done()
 
-	if err := e.tsServer.Start(); err != nil {
-		e.updateStatus(StatusError, err.Error())
+	startErr := e.tsServer.Start()
+	e.mu.Lock()
+	doneCh := e.tsStartDone
+	e.mu.Unlock()
+	if doneCh != nil {
+		close(doneCh)
+	}
+	if startErr != nil {
+		e.updateStatus(StatusError, startErr.Error())
+		return
+	}
+	if e.ctx.Err() != nil {
 		return
 	}
 
@@ -308,11 +323,14 @@ func (e *Engine) syncPeers(st any) {
 		return
 	}
 	jsonStr := string(bytes)
-	if jsonStr != e.lastPeers {
+	e.mu.Lock()
+	changed := jsonStr != e.lastPeers
+	if changed {
 		e.lastPeers = jsonStr
-		if e.config.OnPeersUpdated != nil {
-			e.config.OnPeersUpdated(jsonStr)
-		}
+	}
+	e.mu.Unlock()
+	if changed && e.config.OnPeersUpdated != nil {
+		e.config.OnPeersUpdated(jsonStr)
 	}
 }
 
@@ -338,23 +356,79 @@ func (e *Engine) Stop() {
 	if e.listener != nil {
 		_ = e.listener.Close()
 	}
-	if e.tsServer != nil {
-		_ = e.tsServer.Close()
-	}
+	tsSrv := e.tsServer
+	startDone := e.tsStartDone
 	e.mu.Unlock()
 
 	go func() {
+		if startDone != nil {
+			<-startDone
+		}
+		if tsSrv != nil {
+			_ = tsSrv.Close()
+		}
 		e.wg.Wait()
 		e.updateStatus(StatusDisconnected, "stopped")
 	}()
 }
 
+// StopAndWait terminates the engine and waits up to timeout for workers to exit
+func (e *Engine) StopAndWait(timeout time.Duration) {
+	e.mu.Lock()
+	if e.cancel != nil {
+		e.cancel()
+	}
+	if e.httpSrv != nil {
+		_ = e.httpSrv.Close()
+	}
+	if e.listener != nil {
+		_ = e.listener.Close()
+	}
+	tsSrv := e.tsServer
+	startDone := e.tsStartDone
+	e.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		// tsnet.Server.Close must not run before or concurrently with Start.
+		if startDone != nil {
+			<-startDone
+		}
+		if tsSrv != nil {
+			_ = tsSrv.Close()
+		}
+		e.wg.Wait()
+		close(done)
+	}()
+
+	if timeout > 0 {
+		select {
+		case <-done:
+		case <-time.After(timeout):
+		}
+	} else {
+		<-done
+	}
+	e.updateStatus(StatusDisconnected, "stopped")
+}
+
+// NotifyTransferComplete emits a completion callback via the transfer manager
+func (e *Engine) NotifyTransferComplete(transferID string, success bool, errorMsg string) {
+	if e.transfers != nil {
+		e.transfers.notifyComplete(transferID, success, errorMsg)
+	}
+}
+
 // SendFile initiates an outbound file transfer to a peer IP
 func (e *Engine) SendFile(peerIP string, filePath string, transferID string) error {
-	if e.tsServer == nil {
+	e.mu.Lock()
+	tsSrv := e.tsServer
+	e.mu.Unlock()
+	if tsSrv == nil {
+		e.NotifyTransferComplete(transferID, false, "engine not started")
 		return errors.New("engine not started")
 	}
-	client := e.tsServer.HTTPClient()
+	client := tsSrv.HTTPClient()
 	sanitizedName := sanitizeHostname(e.config.DeviceName)
 	serverHostname := fmt.Sprintf("snowdrop-%s", sanitizedName)
 	return e.transfers.SendFile(e.ctx, client, peerIP, e.config.Port, filePath, transferID, serverHostname)
@@ -362,10 +436,14 @@ func (e *Engine) SendFile(peerIP string, filePath string, transferID string) err
 
 // SendBatch initiates an outbound multi-file batch transfer to a peer IP
 func (e *Engine) SendBatch(peerIP string, batchID string, files []BatchSendSource) error {
-	if e.tsServer == nil {
+	e.mu.Lock()
+	tsSrv := e.tsServer
+	e.mu.Unlock()
+	if tsSrv == nil {
+		e.NotifyTransferComplete(batchID, false, "engine not started")
 		return errors.New("engine not started")
 	}
-	client := e.tsServer.HTTPClient()
+	client := tsSrv.HTTPClient()
 	sanitizedName := sanitizeHostname(e.config.DeviceName)
 	serverHostname := fmt.Sprintf("snowdrop-%s", sanitizedName)
 	return e.transfers.SendBatch(e.ctx, client, peerIP, e.config.Port, batchID, files, serverHostname)
@@ -406,10 +484,23 @@ func (e *Engine) RevokeTrusted(nodeID string) bool {
 
 // SetApprovalConfig updates security approval preferences
 func (e *Engine) SetApprovalConfig(requireApproval, autoAcceptTrusted bool) {
-	e.mu.Lock()
-	e.config.RequireApproval = requireApproval
-	e.config.AutoAcceptTrusted = autoAcceptTrusted
-	e.mu.Unlock()
+	if e.transfers != nil {
+		e.transfers.SetApprovalConfig(requireApproval, autoAcceptTrusted)
+	}
+}
+
+// SetDownloadDir updates the destination download directory safely
+func (e *Engine) SetDownloadDir(dir string) error {
+	if strings.TrimSpace(dir) == "" {
+		return errors.New("empty download dir")
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create download dir: %w", err)
+	}
+	if e.transfers != nil {
+		e.transfers.SetDownloadDir(dir)
+	}
+	return nil
 }
 
 // SignOut logs out the current node from Tailscale and requests a fresh login URL

@@ -76,6 +76,7 @@ type EngineConfig struct {
 	OnTransferComplete  func(transferID string, success bool, errorMsg string)
 	OnBatchProgress     func(batchID string, fileIndex int, totalFiles int, fileName string, fileBytes int64, fileTotal int64, batchBytes int64, batchTotal int64)
 	OnBatchFileReceived func(batchID string, fileIndex int, totalFiles int, fileName string, filePath string)
+	OnApprovalDismissed func(transferID string, reason string)
 	RequireApproval     bool
 	AutoAcceptTrusted   bool
 }

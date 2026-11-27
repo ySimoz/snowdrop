@@ -57,10 +57,50 @@ type TransferManager struct {
 	activeCnt     int
 }
 
+const defaultPendingTTL = 15 * time.Minute
+
+func (tm *TransferManager) pruneExpiredLocked(now time.Time, ttl time.Duration) {
+	for id, req := range tm.pending {
+		if now.Sub(req.CreatedAt) > ttl {
+			delete(tm.pending, id)
+		}
+	}
+	for id, batch := range tm.batches {
+		if now.Sub(batch.CreatedAt) > ttl {
+			delete(tm.batches, id)
+		}
+	}
+}
+
 func (tm *TransferManager) SetWhoIsResolver(fn WhoIsResolver) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	tm.whoIsResolver = fn
+}
+
+func (tm *TransferManager) SetApprovalConfig(requireApproval, autoAcceptTrusted bool) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.config.RequireApproval = requireApproval
+	tm.config.AutoAcceptTrusted = autoAcceptTrusted
+}
+
+func (tm *TransferManager) approvalConfig() (bool, bool) {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	return tm.config.RequireApproval, tm.config.AutoAcceptTrusted
+}
+
+func (tm *TransferManager) SetDownloadDir(dir string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.config.DownloadDir = dir
+}
+
+func (tm *TransferManager) downloadDir() string {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	return tm.config.DownloadDir
 }
 
 func NewTransferManager(cfg *EngineConfig, ts ...*TrustStore) *TransferManager {
@@ -170,12 +210,13 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 		}
 
 		// Storage pre-flight check
-		if !checkDiskSpaceAvailable(tm.config.DownloadDir, sizeBytes+50*1024*1024) {
+		if !checkDiskSpaceAvailable(tm.downloadDir(), sizeBytes+50*1024*1024) {
 			http.Error(w, "insufficient disk space on receiver", http.StatusInsufficientStorage)
 			return
 		}
 
 		tm.mu.Lock()
+		tm.pruneExpiredLocked(time.Now(), defaultPendingTTL)
 		if _, exists := tm.pending[transferID]; exists {
 			tm.mu.Unlock()
 			http.Error(w, "transfer id conflict", http.StatusConflict)
@@ -185,7 +226,8 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 
 		// Approval check
 		trusted := tm.trustStore != nil && tm.trustStore.IsTrusted(senderNodeID)
-		needsApproval := tm.config.RequireApproval && !(trusted && tm.config.AutoAcceptTrusted)
+		reqApproval, autoAccept := tm.approvalConfig()
+		needsApproval := reqApproval && !(trusted && autoAccept)
 
 		if needsApproval {
 			tm.mu.Lock()
@@ -225,12 +267,18 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 				tm.mu.Lock()
 				delete(tm.approvals, transferID)
 				tm.mu.Unlock()
+				if tm.config.OnApprovalDismissed != nil {
+					tm.config.OnApprovalDismissed(transferID, "timeout")
+				}
 				http.Error(w, "transfer approval timed out", http.StatusRequestTimeout)
 				return
 			case <-r.Context().Done():
 				tm.mu.Lock()
 				delete(tm.approvals, transferID)
 				tm.mu.Unlock()
+				if tm.config.OnApprovalDismissed != nil {
+					tm.config.OnApprovalDismissed(transferID, "sender_disconnected")
+				}
 				return
 			}
 		} else if tm.config.OnIncomingRequest != nil {
@@ -264,7 +312,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 			return
 		}
 
-		if manifest.BatchID == "" || len(manifest.Files) == 0 || manifest.TotalBytes <= 0 {
+		if manifest.BatchID == "" || len(manifest.Files) == 0 || manifest.TotalBytes < 0 {
 			http.Error(w, "invalid batch parameters", http.StatusBadRequest)
 			return
 		}
@@ -286,7 +334,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 		}
 
 		// Storage pre-flight check: totalBytes + 50MB
-		if !checkDiskSpaceAvailable(tm.config.DownloadDir, manifest.TotalBytes+50*1024*1024) {
+		if !checkDiskSpaceAvailable(tm.downloadDir(), manifest.TotalBytes+50*1024*1024) {
 			http.Error(w, "insufficient disk space on receiver", http.StatusInsufficientStorage)
 			return
 		}
@@ -314,6 +362,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 		}
 
 		tm.mu.Lock()
+		tm.pruneExpiredLocked(time.Now(), defaultPendingTTL)
 		if _, exists := tm.batches[manifest.BatchID]; exists {
 			tm.mu.Unlock()
 			http.Error(w, "batch id conflict", http.StatusConflict)
@@ -323,7 +372,8 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 
 		// Approval check
 		trusted := tm.trustStore != nil && tm.trustStore.IsTrusted(senderNodeID)
-		needsApproval := tm.config.RequireApproval && !(trusted && tm.config.AutoAcceptTrusted)
+		reqApproval, autoAccept := tm.approvalConfig()
+		needsApproval := reqApproval && !(trusted && autoAccept)
 
 		fileSummary := fmt.Sprintf("%d files", len(manifest.Files))
 		if len(manifest.Files) == 1 {
@@ -372,12 +422,18 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 				tm.mu.Lock()
 				delete(tm.approvals, manifest.BatchID)
 				tm.mu.Unlock()
+				if tm.config.OnApprovalDismissed != nil {
+					tm.config.OnApprovalDismissed(manifest.BatchID, "timeout")
+				}
 				http.Error(w, "transfer approval timed out", http.StatusRequestTimeout)
 				return
 			case <-r.Context().Done():
 				tm.mu.Lock()
 				delete(tm.approvals, manifest.BatchID)
 				tm.mu.Unlock()
+				if tm.config.OnApprovalDismissed != nil {
+					tm.config.OnApprovalDismissed(manifest.BatchID, "sender_disconnected")
+				}
 				return
 			}
 		} else if tm.config.OnIncomingRequest != nil {
@@ -451,7 +507,8 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 				tm.UnregisterCancel(fileID)
 			}()
 
-			if err := os.MkdirAll(tm.config.DownloadDir, 0755); err != nil {
+			dlDir := tm.downloadDir()
+			if err := os.MkdirAll(dlDir, 0755); err != nil {
 				msg := fmt.Sprintf("cannot create download dir: %v", err)
 				if tm.config.OnTransferComplete != nil {
 					tm.config.OnTransferComplete(batchID, false, msg)
@@ -460,7 +517,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 				return
 			}
 
-			tempPath := filepath.Join(tm.config.DownloadDir, fmt.Sprintf(".%s-%s.part", batchID, fileID))
+			tempPath := filepath.Join(dlDir, fmt.Sprintf(".%s-%s.part", batchID, fileID))
 			tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 			if err != nil {
 				msg := fmt.Sprintf("cannot create temporary file: %v", err)
@@ -552,7 +609,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 				return
 			}
 
-			destPath := resolveUniquePath(tm.config.DownloadDir, fileItem.FileName)
+			destPath := resolveUniquePath(dlDir, fileItem.FileName)
 			if err := os.Rename(tempPath, destPath); err != nil {
 				msg := fmt.Sprintf("failed moving file to destination: %v", err)
 				if tm.config.OnTransferComplete != nil {
@@ -568,7 +625,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 
 			tm.mu.Lock()
 			delete(batch.FilesRemaining, fileID)
-			batch.TransferredBytes += fileItem.FileSize
+			batch.TransferredBytes += transferred
 			batch.FileIndex++
 			batch.CompletedFiles++
 			isAllDone := len(batch.FilesRemaining) == 0
@@ -608,7 +665,8 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 		tm.RegisterCancel(transferID, cancel)
 		defer tm.UnregisterCancel(transferID)
 
-		if err := os.MkdirAll(tm.config.DownloadDir, 0755); err != nil {
+		dlDir := tm.downloadDir()
+		if err := os.MkdirAll(dlDir, 0755); err != nil {
 			msg := fmt.Sprintf("cannot create download dir: %v", err)
 			if tm.config.OnTransferComplete != nil {
 				tm.config.OnTransferComplete(transferID, false, msg)
@@ -617,7 +675,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 			return
 		}
 
-		tempPath := filepath.Join(tm.config.DownloadDir, fmt.Sprintf(".%s.part", transferID))
+		tempPath := filepath.Join(dlDir, fmt.Sprintf(".%s.part", transferID))
 		tempFile, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 		if err != nil {
 			msg := fmt.Sprintf("cannot create temporary file: %v", err)
@@ -695,7 +753,7 @@ func (tm *TransferManager) Router(nodeID string) http.Handler {
 			return
 		}
 
-		destPath := resolveUniquePath(tm.config.DownloadDir, req.FileName)
+		destPath := resolveUniquePath(dlDir, req.FileName)
 		if err := os.Rename(tempPath, destPath); err != nil {
 			msg := fmt.Sprintf("failed moving file to destination: %v", err)
 			if tm.config.OnTransferComplete != nil {

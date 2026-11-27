@@ -11,6 +11,8 @@
 .DS_Store
 macos/.build/
 macos/dist/
+macos-next/.build/
+macos-next/Snowdrop.xcodeproj/
 
 # Go
 bin/
@@ -24,6 +26,7 @@ coverage.out
 build/
 app/build/
 android/app/build/
+android-next/app/build/
 local.properties
 .idea/
 *.iml

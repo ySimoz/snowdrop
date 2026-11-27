@@ -1,0 +1,73 @@
+name: Snowdrop
+options:
+  bundleIdPrefix: com.snowdrop.mac
+  deploymentTarget:
+    macOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    ENABLE_APP_SANDBOX: YES
+targets:
+  SnowdropCore:
+    type: framework
+    platform: macOS
+    sources:
+      - Sources/SnowdropCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.snowdrop.mac.core
+        GENERATE_INFOPLIST_FILE: YES
+  SnowdropBridge:
+    type: library.static
+    platform: macOS
+    sources:
+      - Sources/SnowdropBridge
+    dependencies:
+      - target: SnowdropCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.snowdrop.mac.bridge
+        SWIFT_INCLUDE_PATHS: $(PROJECT_DIR)/Sources/CSnowdrop/include
+  Snowdrop:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/SnowdropApp
+      - Resources/Assets.xcassets
+    dependencies:
+      - target: SnowdropCore
+      - target: SnowdropBridge
+      - target: SnowdropShare
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.snowdrop.mac
+        INFOPLIST_FILE: Config/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Config/Snowdrop.entitlements
+        SWIFT_INCLUDE_PATHS: $(PROJECT_DIR)/Sources/CSnowdrop/include
+        LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/Frameworks
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -lsnowdrop
+  SnowdropShare:
+    type: app-extension
+    platform: macOS
+    sources:
+      - ShareExtension
+      - Resources/Assets.xcassets
+      - path: Sources/SnowdropCore/ShareHandoff.swift
+      - path: Sources/SnowdropCore/FilePathValidator.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.snowdrop.mac.share
+        INFOPLIST_FILE: Config/ShareExtension-Info.plist
+        CODE_SIGN_ENTITLEMENTS: Config/SnowdropShare.entitlements
+        SKIP_INSTALL: YES
+schemes:
+  Snowdrop:
+    build:
+      targets:
+        Snowdrop: all
+        SnowdropShare: all
