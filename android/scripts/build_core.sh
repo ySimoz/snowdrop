@@ -23,6 +23,6 @@ if ! command -v gomobile >/dev/null 2>&1 || gomobile version 2>&1 | grep -q "out
 fi
 
 mkdir -p "$NEXT_DIR/app/libs"
-cd "$ROOT_DIR"
-gomobile bind -target=android/arm64,android/amd64 -androidapi 26 -ldflags="-checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384" -o "$NEXT_DIR/app/libs/core.aar" ./core
+cd "$ROOT_DIR/core"
+gomobile bind -target=android/arm64,android/amd64 -androidapi 26 -ldflags="-checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384" -o "$NEXT_DIR/app/libs/core.aar" .
 echo "==> Generated: $NEXT_DIR/app/libs/core.aar"

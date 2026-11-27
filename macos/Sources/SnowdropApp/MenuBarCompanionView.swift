@@ -49,6 +49,8 @@ struct MenuBarCompanionView: View {
         }
         .padding(16)
         .frame(width: 320)
+        .textSelection(.disabled)
+        .pointerStyle(.default)
         .overlay {
             if isDropTargeted {
                 RoundedRectangle(cornerRadius: 12)
@@ -116,6 +118,7 @@ struct MenuBarCompanionView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .pointerStyle(.link)
             } else {
                 Text("Preparing sign-in link")
                     .font(.caption)
@@ -149,12 +152,14 @@ struct MenuBarCompanionView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .pointerStyle(.link)
 
                 Button("Always Trust") {
                     Task { await store.resolveApproval(request, decision: .alwaysTrust) }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .pointerStyle(.link)
 
                 Spacer()
 
@@ -163,6 +168,7 @@ struct MenuBarCompanionView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .pointerStyle(.link)
             }
         }
         .padding(12)
@@ -185,6 +191,7 @@ struct MenuBarCompanionView: View {
                     .padding(.vertical, 8)
                 }
                 .buttonStyle(.bordered)
+                .pointerStyle(.link)
             } else {
                 HStack(spacing: 8) {
                     Image(systemName: store.stagedFiles.count > 1 ? "doc.on.doc" : "doc")
@@ -209,6 +216,7 @@ struct MenuBarCompanionView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .pointerStyle(.link)
                 }
             }
         }
@@ -244,8 +252,7 @@ struct MenuBarCompanionView: View {
                             Button("Send") {
                                 Task { await store.sendStagedFiles(to: peer) }
                             }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
+                            .buttonStyle(MenuBarSendButtonStyle())
                             .disabled(peer.primaryIP == nil || store.stagedFiles.isEmpty)
                             .accessibilityLabel("Send staged files to \(peer.displayName)")
                         }
@@ -265,7 +272,7 @@ struct MenuBarCompanionView: View {
                                     Image(systemName: "xmark.circle")
                                         .foregroundStyle(.secondary)
                                 }
-                                .buttonStyle(.borderless)
+                                .buttonStyle(MenuBarActionButtonStyle(isCompact: true))
                                 .accessibilityLabel("Cancel transfer of \(transfer.fileName)")
                             }
                         }
@@ -312,7 +319,7 @@ struct MenuBarCompanionView: View {
                             Image(systemName: "xmark.circle")
                                 .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(MenuBarActionButtonStyle(isCompact: true))
                         .accessibilityLabel("Cancel transfer of \(transfer.fileName)")
                     }
                 }
@@ -323,25 +330,25 @@ struct MenuBarCompanionView: View {
     }
 
     private var footerSection: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             Button("Open Snowdrop") {
                 NSApp.setActivationPolicy(.regular)
                 openWindow(id: "main")
                 NSApp.activate(ignoringOtherApps: true)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(MenuBarActionButtonStyle())
 
             Spacer()
 
             SettingsLink {
                 Label("Settings", systemImage: "gearshape")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(MenuBarActionButtonStyle())
 
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(MenuBarActionButtonStyle())
         }
         .font(.callout)
     }
@@ -353,6 +360,71 @@ struct MenuBarCompanionView: View {
         case .connecting: .accentColor
         case .disconnected: .secondary
         case .error: .red
+        }
+    }
+}
+
+private struct MenuBarActionButtonStyle: ButtonStyle {
+    var isCompact = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        MenuBarActionButtonBody(
+            configuration: configuration,
+            isCompact: isCompact
+        )
+    }
+
+    private struct MenuBarActionButtonBody: View {
+        let configuration: Configuration
+        let isCompact: Bool
+        @State private var isHovered = false
+
+        var body: some View {
+            configuration.label
+                .padding(.horizontal, isCompact ? 4 : 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.primary.opacity(configuration.isPressed ? 0.14 : (isHovered ? 0.08 : 0)))
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .onHover { isHovered = $0 }
+                .pointerStyle(.link)
+        }
+    }
+}
+
+private struct MenuBarSendButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        MenuBarSendButtonBody(configuration: configuration)
+    }
+
+    private struct MenuBarSendButtonBody: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovered = false
+
+        var body: some View {
+            configuration.label
+                .font(.callout.weight(.medium))
+                .foregroundStyle(isEnabled ? Color.white : Color.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isEnabled ? Color.accentColor : Color.primary.opacity(0.08))
+                        .overlay {
+                            if isEnabled && (configuration.isPressed || isHovered) {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.white.opacity(configuration.isPressed ? 0.22 : 0.14))
+                            }
+                        }
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .onHover { hovered in
+                    isHovered = isEnabled && hovered
+                }
+                .pointerStyle(isEnabled ? .link : .default)
         }
     }
 }

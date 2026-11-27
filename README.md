@@ -125,7 +125,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./android/gradlew -p android assembleDebu
 ### Run Tests
 
 ```bash
-go test -race -v ./core
+(cd core && go test -race -v .)
 swift test --package-path macos
 JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./android/gradlew -p android testDebugUnitTest
 ```
