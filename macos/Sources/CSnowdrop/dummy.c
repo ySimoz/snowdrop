@@ -1,2 +1,1 @@
-// Required for C target compilation in SwiftPM
-void _meshdrop_c_anchor(void) {}
+void _snowdrop_c_anchor(void) {}

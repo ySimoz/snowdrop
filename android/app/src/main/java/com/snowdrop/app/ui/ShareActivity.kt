@@ -5,100 +5,169 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Computer
-import androidx.compose.material.icons.filled.Laptop
-import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.snowdrop.app.core.PeerItem
-import com.snowdrop.app.core.SnowdropCoreBridge
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.snowdrop.app.SnowdropApplication
+import com.snowdrop.app.data.FileMetadataResolver
+import com.snowdrop.app.domain.PeerItem
+import com.snowdrop.app.domain.SnowdropFormat
+import com.snowdrop.app.domain.StagedFile
 import com.snowdrop.app.service.TransferService
+import com.snowdrop.app.ui.components.SnowdropGlassSurface
+import com.snowdrop.app.ui.components.peerOsIcon
 import com.snowdrop.app.ui.theme.SnowdropTheme
+import com.snowdrop.app.ui.theme.SnowdropThemeTokens
+import com.snowdrop.app.ui.theme.tabular
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+        )
         super.onCreate(savedInstanceState)
 
-        val uris = extractUrisFromIntent(intent)
+        val uris = extractUris(intent)
         if (uris.isEmpty()) {
             finish()
             return
         }
 
+        val app = application as SnowdropApplication
+        val store = app.store
+
         setContent {
             SnowdropTheme {
-                val peers by SnowdropCoreBridge.peers.collectAsState()
+                val uiState by store.uiState.collectAsStateWithLifecycle()
+                var stagedFiles by remember { mutableStateOf<List<StagedFile>>(emptyList()) }
+                val palette = SnowdropThemeTokens.palette
 
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color.Black.copy(alpha = 0.5f)
+                LaunchedEffect(uris) {
+                    stagedFiles = withContext(Dispatchers.IO) {
+                        FileMetadataResolver.resolveAll(this@ShareActivity, uris)
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .clickable(onClick = { finish() }),
+                    contentAlignment = Alignment.BottomCenter
                 ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.BottomCenter
+                    SnowdropGlassSurface(
+                        hazeState = null,
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(16.dp)
+                            .clickable(enabled = false, onClick = {})
                     ) {
-                        Card(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(16.dp),
-                            shape = RoundedCornerShape(16.dp)
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text(
-                                    "Share via Snowdrop",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    "${uris.size} file(s) ready to send. Select destination peer:",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
+                            val totalBytes = stagedFiles.sumOf { it.byteSize }
+                            val fileSummary = when {
+                                stagedFiles.isEmpty() -> "${uris.size} items"
+                                stagedFiles.size == 1 -> stagedFiles.first().name
+                                else -> "${stagedFiles.size} files"
+                            }
 
-                                if (peers.isEmpty()) {
-                                    Text(
-                                        "No peers currently online on your Tailnet.",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        modifier = Modifier.padding(vertical = 16.dp)
-                                    )
-                                } else {
-                                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        items(peers) { peer ->
-                                            SharePeerRow(peer = peer) {
-                                                peer.primaryIP?.let { ip ->
-                                                    TransferService.start(this@ShareActivity)
-                                                    val staged = uris.map { SnowdropCoreBridge.getFileInfo(this@ShareActivity, it) }
-                                                    SnowdropCoreBridge.sendFiles(this@ShareActivity, ip, staged, peer.displayName)
-                                                }
-                                                finish()
-                                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = "Send with Snowdrop",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = palette.textPrimary
+                                )
+                                Text(
+                                    text = if (totalBytes > 0L) "$fileSummary · ${SnowdropFormat.bytes(totalBytes)}" else fileSummary,
+                                    style = MaterialTheme.typography.bodySmall.tabular(),
+                                    color = palette.textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            val onlinePeers = uiState.filteredPeers.filter { it.online }
+                            if (onlinePeers.isEmpty()) {
+                                Text(
+                                    text = "No online devices found on your Tailnet",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = palette.textSecondary,
+                                    modifier = Modifier.padding(vertical = 12.dp)
+                                )
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 260.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    items(onlinePeers, key = { it.id }) { peer ->
+                                        SharePeerRow(
+                                            peer = peer,
+                                            enabled = stagedFiles.isNotEmpty()
+                                        ) {
+                                            TransferService.start(this@ShareActivity)
+                                            store.sendDirectFiles(peer, stagedFiles)
+                                            finish()
                                         }
                                     }
                                 }
+                            }
 
-                                Spacer(modifier = Modifier.height(8.dp))
-                                TextButton(
-                                    onClick = { finish() },
-                                    modifier = Modifier.align(Alignment.End)
-                                ) {
-                                    Text("Cancel")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(onClick = { finish() }) {
+                                    Text("Cancel", style = MaterialTheme.typography.labelMedium, color = palette.textSecondary)
                                 }
                             }
                         }
@@ -108,40 +177,56 @@ class ShareActivity : ComponentActivity() {
         }
     }
 
-    private fun extractUrisFromIntent(intent: Intent?): List<Uri> {
+    private fun extractUris(intent: Intent?): List<Uri> {
         if (intent == null) return emptyList()
-        val list = mutableListOf<Uri>()
+        val result = LinkedHashSet<Uri>()
+
         when (intent.action) {
             Intent.ACTION_SEND -> {
-                val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val streamUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
                 } else {
                     @Suppress("DEPRECATION")
                     intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
                 }
-                uri?.let { list.add(it) }
+                if (streamUri != null) result.add(streamUri)
             }
             Intent.ACTION_SEND_MULTIPLE -> {
-                val uris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val streamUris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
                 } else {
                     @Suppress("DEPRECATION")
                     intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
                 }
-                uris?.let { list.addAll(it) }
+                if (streamUris != null) result.addAll(streamUris)
             }
         }
-        return list
+
+        val clipData = intent.clipData
+        if (clipData != null) {
+            for (i in 0 until clipData.itemCount) {
+                clipData.getItemAt(i).uri?.let { result.add(it) }
+            }
+        }
+
+        return result.toList()
     }
 }
 
 @Composable
-fun SharePeerRow(peer: PeerItem, onSelect: () -> Unit) {
+private fun SharePeerRow(
+    peer: PeerItem,
+    enabled: Boolean,
+    onSelect: () -> Unit
+) {
+    val palette = SnowdropThemeTokens.palette
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = peer.online, onClick = onSelect),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(enabled = enabled && peer.online, onClick = onSelect),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = palette.surface),
+        border = BorderStroke(1.dp, palette.hairline)
     ) {
         Row(
             modifier = Modifier
@@ -150,22 +235,32 @@ fun SharePeerRow(peer: PeerItem, onSelect: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = when (peer.os.lowercase()) {
-                    "darwin", "macos", "ios" -> Icons.Default.Laptop
-                    "android" -> Icons.Default.Smartphone
-                    else -> Icons.Default.Computer
-                },
+                imageVector = peerOsIcon(peer.os),
                 contentDescription = null,
-                tint = if (peer.online) MaterialTheme.colorScheme.primary else Color.Gray,
-                modifier = Modifier.size(24.dp)
+                tint = palette.accent,
+                modifier = Modifier.size(18.dp)
             )
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(peer.displayName, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                peer.primaryIP?.let { ip ->
-                    Text(ip, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                Text(
+                    text = peer.displayName,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                    color = palette.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = peer.primaryIP.orEmpty().ifEmpty { "Online" },
+                    style = MaterialTheme.typography.bodySmall.tabular(),
+                    color = palette.textSecondary
+                )
             }
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(palette.positive)
+            )
         }
     }
 }

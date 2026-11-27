@@ -66,7 +66,7 @@ For developers and security engineers interested in how Snowdrop achieves zero-c
                    +--------------------+--------------------+
                    |                                         |
 +------------------v------------------+   +------------------v------------------+
-|        macOS Client (macos-next)    |   |      Android Client (android-next)  |
+|            macOS Client             |   |           Android Client            |
 |                                     |   |                                     |
 |  • SwiftUI 6 + Liquid Glass         |   |  • Jetpack Compose + Haze Glass     |
 |  • App Sandbox + Hardened Runtime   |   |  • Android 15 FGS & Share Target    |
@@ -106,28 +106,28 @@ Transfers utilize chunked HTTP streaming over the userspace WireGuard mesh with 
 - **macOS**: macOS 26+ with Xcode and `xcodegen`
 - **Android**: JDK 17, Android SDK (API 35), and NDK r27 (`27.3.13750724`)
 
-### macOS App (`macos-next`)
+### macOS App
 
 ```bash
-./macos-next/scripts/build_core.sh
-./macos-next/scripts/install_local.sh
+./macos/scripts/build_core.sh
+./macos/scripts/install_local.sh
 # Installs signed Snowdrop.app to /Applications/Snowdrop.app
 ```
 
-### Android App (`android-next`)
+### Android App
 
 ```bash
-./android-next/scripts/build_core.sh
-JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./android-next/gradlew -p android-next assembleDebug
-# Output: android-next/app/build/outputs/apk/debug/app-debug.apk
+./android/scripts/build_core.sh
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./android/gradlew -p android assembleDebug
+# Output: android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ### Run Tests
 
 ```bash
 go test -race -v ./core
-swift test --package-path macos-next
-JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./android-next/gradlew -p android-next testDebugUnitTest
+swift test --package-path macos
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./android/gradlew -p android testDebugUnitTest
 ```
 
 ---

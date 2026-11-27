@@ -11,6 +11,8 @@ typedef void (*ProgressCallback)(const char* transferID, int64_t current, int64_
 typedef void (*TransferCompleteCallback)(const char* transferID, bool success, const char* errorMsg);
 typedef void (*ApprovalCallback)(const char* transferID, const char* nodeID, const char* senderName, const char* fileName, int64_t fileSize);
 typedef void (*BatchProgressCallback)(const char* batchID, int fileIndex, int totalFiles, const char* fileName, int64_t fileCur, int64_t fileTotal, int64_t batchCur, int64_t batchTotal);
+typedef void (*BatchFileReceivedCallback)(const char* batchID, int fileIndex, int totalFiles, const char* fileName, const char* filePath);
+typedef void (*ApprovalDismissedCallback)(const char* transferID, const char* reason);
 
 void RegisterCallbacks(
     StatusCallback statusCb,
@@ -22,6 +24,8 @@ void RegisterCallbacks(
 
 void RegisterApprovalCallback(ApprovalCallback cb);
 void RegisterBatchProgressCallback(BatchProgressCallback cb);
+void RegisterBatchFileReceivedCallback(BatchFileReceivedCallback cb);
+void RegisterApprovalDismissedCallback(ApprovalDismissedCallback cb);
 
 int StartEngine(const char* dataDir, const char* downloadDir, const char* deviceName);
 void StopEngine(void);
@@ -31,8 +35,10 @@ void CancelTransfer(const char* transferID);
 
 bool ResolveTransferApproval(const char* transferID, int decision);
 char* GetTrustedPeers(void);
+void FreeCString(const char* ptr);
 bool RevokeTrusted(const char* nodeID);
 void SetApprovalConfig(bool requireApproval, bool autoAcceptTrusted);
+bool SetDownloadDir(const char* downloadDir);
 bool SnowdropSignOut(void);
 
 #endif

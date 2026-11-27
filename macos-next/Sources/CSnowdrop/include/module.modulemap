@@ -1,4 +1,0 @@
-module CSnowdrop [system] {
-    header "snowdrop.h"
-    export *
-}

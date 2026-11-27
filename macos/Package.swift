@@ -1,13 +1,15 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "Snowdrop",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v26)
     ],
     products: [
-        .executable(name: "Snowdrop", targets: ["Snowdrop"])
+        .library(name: "SnowdropCore", targets: ["SnowdropCore"]),
+        .library(name: "SnowdropBridge", targets: ["SnowdropBridge"]),
+        .executable(name: "SnowdropApp", targets: ["SnowdropApp"])
     ],
     targets: [
         .target(
@@ -15,10 +17,41 @@ let package = Package(
             path: "Sources/CSnowdrop",
             publicHeadersPath: "include"
         ),
+        .target(
+            name: "SnowdropCore",
+            path: "Sources/SnowdropCore"
+        ),
+        .target(
+            name: "SnowdropBridge",
+            dependencies: ["CSnowdrop", "SnowdropCore"],
+            path: "Sources/SnowdropBridge",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L", "\(Context.packageDirectory)/Frameworks",
+                    "-lsnowdrop"
+                ])
+            ]
+        ),
         .executableTarget(
-            name: "Snowdrop",
-            dependencies: ["CSnowdrop"],
-            path: "Sources/Snowdrop",
+            name: "SnowdropApp",
+            dependencies: ["SnowdropCore", "SnowdropBridge"],
+            path: "Sources/SnowdropApp",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L", "\(Context.packageDirectory)/Frameworks",
+                    "-lsnowdrop"
+                ])
+            ]
+        ),
+        .testTarget(
+            name: "SnowdropCoreTests",
+            dependencies: ["SnowdropCore"],
+            path: "Tests/SnowdropCoreTests"
+        ),
+        .testTarget(
+            name: "SnowdropBridgeTests",
+            dependencies: ["SnowdropBridge", "SnowdropCore"],
+            path: "Tests/SnowdropBridgeTests",
             linkerSettings: [
                 .unsafeFlags([
                     "-L", "\(Context.packageDirectory)/Frameworks",
@@ -26,5 +59,6 @@ let package = Package(
                 ])
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

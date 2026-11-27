@@ -1,5 +1,6 @@
 package com.snowdrop.app.service
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,142 +9,131 @@ import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.snowdrop.app.R
-import com.snowdrop.app.core.ApprovalRequest
-import com.snowdrop.app.core.SnowdropCoreBridge
+import com.snowdrop.app.SnowdropApplication
+import com.snowdrop.app.domain.ApprovalDecision
+import com.snowdrop.app.domain.ApprovalRequest
+import com.snowdrop.app.domain.TransferDirection
+import com.snowdrop.app.domain.TransferItem
 import com.snowdrop.app.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class TransferActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val transferID = intent.getStringExtra(TransferService.EXTRA_TRANSFER_ID) ?: ""
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.cancel(TransferService.NOTIFICATION_APPROVAL_ID)
+        val app = context.applicationContext as? SnowdropApplication ?: return
+        val transferId = intent.getStringExtra(TransferService.EXTRA_TRANSFER_ID).orEmpty()
+        if (transferId.isNotEmpty()) {
+            TransferService.cancelApprovalNotification(context, transferId)
+        }
 
         when (intent.action) {
-            TransferService.ACTION_APPROVAL_ACCEPT -> {
-                SnowdropCoreBridge.resolveApproval(transferID, 1)
-            }
-            TransferService.ACTION_APPROVAL_TRUST -> {
-                SnowdropCoreBridge.resolveApproval(transferID, 2)
-            }
-            TransferService.ACTION_APPROVAL_DECLINE -> {
-                SnowdropCoreBridge.resolveApproval(transferID, 3)
-            }
-            TransferService.ACTION_CANCEL -> {
-                if (transferID.isNotEmpty()) {
-                    SnowdropCoreBridge.cancelTransfer(transferID)
-                }
-            }
+            TransferService.ACTION_APPROVAL_ACCEPT ->
+                app.store.resolveApproval(transferId, ApprovalDecision.ACCEPT)
+            TransferService.ACTION_APPROVAL_TRUST ->
+                app.store.resolveApproval(transferId, ApprovalDecision.ALWAYS_TRUST)
+            TransferService.ACTION_APPROVAL_DECLINE ->
+                app.store.resolveApproval(transferId, ApprovalDecision.DECLINE)
+            TransferService.ACTION_CANCEL ->
+                if (transferId.isNotEmpty()) app.store.cancelTransfer(transferId)
         }
     }
 }
 
 class TransferService : Service() {
-    private val serviceScope = CoroutineScope(Dispatchers.Main)
-    private var job: Job? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var observeJob: Job? = null
+    private val postedTransferIds = mutableMapOf<String, Int>()
     private val notificationManager by lazy {
         getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    }
-
-    override fun onCreate() {
-        super.onCreate()
-        createNotificationChannels(this)
-        SnowdropCoreBridge.init(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                job?.cancel()
+                observeJob?.cancel()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
             }
             ACTION_CANCEL -> {
-                val transferID = intent.getStringExtra(EXTRA_TRANSFER_ID)
-                if (!transferID.isNullOrEmpty()) {
-                    SnowdropCoreBridge.cancelTransfer(transferID)
+                val transferId = intent.getStringExtra(EXTRA_TRANSFER_ID).orEmpty()
+                if (transferId.isNotEmpty()) {
+                    (application as? SnowdropApplication)?.store?.cancelTransfer(transferId)
                 }
             }
         }
 
-        startForegroundNotification()
-        observeTransfer()
+        createNotificationChannels(this)
+        val idle = buildIdleNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, idle, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIFICATION_ID, idle)
+        }
+        observeActiveTransfers()
         return START_STICKY
     }
 
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        super.onTaskRemoved(rootIntent)
-        startForegroundNotification()
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        observeJob?.cancel()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
-    private fun observeTransfer() {
-        job?.cancel()
-        job = serviceScope.launch {
-            SnowdropCoreBridge.activeTransfer.collectLatest { transfer ->
-                if (transfer == null) {
-                    notificationManager.cancel(NOTIFICATION_TRANSFER_ID)
-                    notificationManager.notify(NOTIFICATION_ID, buildIdleNotification())
-                } else {
-                    val progressPct = (transfer.progress * 100).toInt()
-                    val title = if (transfer.isBatch) {
-                        if (transfer.isIncoming) "Receiving Files" else "Sending Files"
-                    } else {
-                        if (transfer.isIncoming) "Receiving File" else "Sending File"
+    override fun onDestroy() {
+        observeJob?.cancel()
+        serviceScope.cancel()
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun observeActiveTransfers() {
+        if (observeJob?.isActive == true) return
+        val app = application as? SnowdropApplication ?: return
+        observeJob = serviceScope.launch {
+            app.store.uiState
+                .map { it.activeTransfers }
+                .distinctUntilChanged()
+                .collectLatest { transfers ->
+                    val currentIds = transfers.mapTo(HashSet()) { it.id }
+                    val stale = postedTransferIds.keys.filter { it !in currentIds }
+                    for (id in stale) {
+                        postedTransferIds.remove(id)?.let { notifId ->
+                            notificationManager.cancel(notifId)
+                        }
                     }
-                    val desc = if (transfer.isBatch) {
-                        "Transferring ${transfer.fileIndex} of ${transfer.totalFiles} files ($progressPct%)"
-                    } else if (transfer.isIncoming) {
-                        "${transfer.fileName} ($progressPct%)"
-                    } else {
-                        "${transfer.fileName} to ${transfer.peerName} ($progressPct%)"
+
+                    if (!canPostNotifications(this@TransferService)) return@collectLatest
+                    for (transfer in transfers) {
+                        val notifId = postedTransferIds.getOrPut(transfer.id) {
+                            transferNotificationId(transfer.id)
+                        }
+                        notificationManager.notify(notifId, buildTransferNotification(transfer))
                     }
-                    notificationManager.notify(
-                        NOTIFICATION_TRANSFER_ID,
-                        buildTransferNotification(title, desc, progressPct, transfer.id)
-                    )
                 }
-            }
-        }
-    }
-
-    private fun startForegroundNotification() {
-        val notification = buildIdleNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
         }
     }
 
     private fun buildIdleNotification(): Notification {
-        val openAppIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pendingOpen = PendingIntent.getActivity(
-            this,
-            0,
-            openAppIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val stopIntent = Intent(this, TransferService::class.java).apply {
-            action = ACTION_STOP
-        }
+        val pendingOpen = pendingMainIntent(this, requestCode = 0)
+        val stopIntent = Intent(this, TransferService::class.java).apply { action = ACTION_STOP }
         val pendingStop = PendingIntent.getService(
             this,
             1,
@@ -151,91 +141,65 @@ class TransferService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val largeIcon = try {
-            BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
-        } catch (_: Exception) { null }
-
-        val builder = NotificationCompat.Builder(this, CHANNEL_SERVICE_ID)
+        return NotificationCompat.Builder(this, CHANNEL_SERVICE_ID)
             .setContentTitle("Snowdrop")
             .setContentText("Ready to receive files in background")
             .setSmallIcon(R.drawable.ic_snowdrop_notification)
+            .setLargeIcon(decodeLargeIcon(this))
             .setContentIntent(pendingOpen)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Service", pendingStop)
-
-        if (largeIcon != null) {
-            builder.setLargeIcon(largeIcon)
-        }
-
-        return builder.build()
+            .addAction(0, "Stop", pendingStop)
+            .build()
     }
 
-    private fun buildTransferNotification(
-        title: String,
-        text: String,
-        progress: Int,
-        transferID: String
-    ): Notification {
-        val openAppIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+    private fun buildTransferNotification(transfer: TransferItem): Notification {
+        val pct = (transfer.progress * 100).toInt()
+        val isIncoming = transfer.direction == TransferDirection.INCOMING
+        val title = when {
+            transfer.isBatch && isIncoming -> "Receiving files"
+            transfer.isBatch -> "Sending files"
+            isIncoming -> "Receiving file"
+            else -> "Sending file"
         }
-        val pendingOpen = PendingIntent.getActivity(
+        val body = when {
+            transfer.isBatch -> "File ${transfer.fileIndex} of ${transfer.totalFiles} ($pct%)"
+            isIncoming -> "${transfer.fileName} ($pct%)"
+            else -> "${transfer.fileName} to ${transfer.peerName} ($pct%)"
+        }
+
+        val cancelIntent = Intent(this, TransferActionReceiver::class.java).apply {
+            action = ACTION_CANCEL
+            putExtra(EXTRA_TRANSFER_ID, transfer.id)
+        }
+        val cancelReqCode = (transfer.id.hashCode() and 0xFFFF) + 20_000
+        val pendingCancel = PendingIntent.getBroadcast(
             this,
-            0,
-            openAppIntent,
+            cancelReqCode,
+            cancelIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val largeIcon = try {
-            BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
-        } catch (_: Exception) { null }
-
-        val builder = NotificationCompat.Builder(this, CHANNEL_TRANSFER_ID)
+        return NotificationCompat.Builder(this, CHANNEL_TRANSFER_ID)
             .setContentTitle(title)
-            .setContentText(text)
-            .setSubText("$progress%")
+            .setContentText(body)
+            .setSubText("$pct%")
             .setSmallIcon(R.drawable.ic_snowdrop_notification)
-            .setContentIntent(pendingOpen)
-            .setProgress(100, progress, false)
+            .setLargeIcon(decodeLargeIcon(this))
+            .setContentIntent(pendingMainIntent(this, requestCode = 0))
+            .setProgress(100, pct, false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-
-        if (largeIcon != null) {
-            builder.setLargeIcon(largeIcon)
-        }
-
-        if (transferID.isNotEmpty()) {
-            val cancelIntent = Intent(this, TransferActionReceiver::class.java).apply {
-                action = ACTION_CANCEL
-                putExtra(EXTRA_TRANSFER_ID, transferID)
-            }
-            val pendingCancel = PendingIntent.getBroadcast(
-                this,
-                2,
-                cancelIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", pendingCancel)
-        }
-
-        return builder.build()
+            .addAction(0, "Cancel", pendingCancel)
+            .build()
     }
-
-    override fun onDestroy() {
-        job?.cancel()
-        super.onDestroy()
-    }
-
-    override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
         const val CHANNEL_SERVICE_ID = "snowdrop_service_channel"
         const val CHANNEL_TRANSFER_ID = "snowdrop_transfer_channel_v2"
+        const val CHANNEL_RECEIVED_ID = "snowdrop_received_channel"
         const val NOTIFICATION_ID = 42445
-        const val NOTIFICATION_TRANSFER_ID = 42447
-        const val NOTIFICATION_APPROVAL_ID = 42446
 
         const val ACTION_CANCEL = "com.snowdrop.app.action.CANCEL"
         const val ACTION_STOP = "com.snowdrop.app.action.STOP"
@@ -244,89 +208,140 @@ class TransferService : Service() {
         const val ACTION_APPROVAL_DECLINE = "com.snowdrop.app.action.APPROVAL_DECLINE"
         const val EXTRA_TRANSFER_ID = "transfer_id"
 
+        private fun transferNotificationId(transferId: String): Int =
+            43_000 + (transferId.hashCode() and 0x0FFF)
+
+        private fun approvalNotificationId(transferId: String): Int =
+            44_000 + (transferId.hashCode() and 0x0FFF)
+
+        private fun receivedNotificationId(uriString: String): Int =
+            45_000 + (uriString.hashCode() and 0x0FFF)
+
+        private fun canPostNotifications(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
+            return ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+
+        private fun decodeLargeIcon(context: Context) = runCatching {
+            BitmapFactory.decodeResource(context.resources, R.mipmap.ic_launcher)
+        }.getOrNull()
+
+        private fun pendingMainIntent(context: Context, requestCode: Int): PendingIntent {
+            val openIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            return PendingIntent.getActivity(
+                context,
+                requestCode,
+                openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
         fun createNotificationChannels(context: Context) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-                val existing = nm.getNotificationChannel(CHANNEL_TRANSFER_ID)
-                if (existing != null && existing.importance < NotificationManager.IMPORTANCE_HIGH) {
-                    nm.deleteNotificationChannel(CHANNEL_TRANSFER_ID)
-                }
-
-                val serviceChannel = NotificationChannel(
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(
+                NotificationChannel(
                     CHANNEL_SERVICE_ID,
-                    "Snowdrop Background Service",
+                    "Background Reachability",
                     NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = "Keeps Snowdrop alive to receive files in background"
-                    setShowBadge(false)
-                }
-
-                val transferChannel = NotificationChannel(
+                ).apply { setShowBadge(false) }
+            )
+            nm.createNotificationChannel(
+                NotificationChannel(
                     CHANNEL_TRANSFER_ID,
-                    "Transfer Alerts & Progress",
+                    "Transfers & Approvals",
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
-                    description = "Alerts for incoming file transfers, approval requests, and progress"
                     enableVibration(true)
                     setShowBadge(true)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 }
-
-                nm.createNotificationChannel(serviceChannel)
-                nm.createNotificationChannel(transferChannel)
-            }
+            )
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_RECEIVED_ID,
+                    "Received Files",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                )
+            )
         }
 
         fun showApprovalNotification(context: Context, req: ApprovalRequest) {
+            if (!canPostNotifications(context)) return
             createNotificationChannels(context)
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-            val acceptIntent = Intent(context, TransferActionReceiver::class.java).apply {
-                action = ACTION_APPROVAL_ACCEPT
-                putExtra(EXTRA_TRANSFER_ID, req.transferId)
-            }
-            val trustIntent = Intent(context, TransferActionReceiver::class.java).apply {
-                action = ACTION_APPROVAL_TRUST
-                putExtra(EXTRA_TRANSFER_ID, req.transferId)
-            }
-            val declineIntent = Intent(context, TransferActionReceiver::class.java).apply {
-                action = ACTION_APPROVAL_DECLINE
-                putExtra(EXTRA_TRANSFER_ID, req.transferId)
+            val baseReqCode = (req.transferId.hashCode() and 0x3FFF) * 4 + 30_000
+            fun actionIntent(actionName: String, offset: Int): PendingIntent {
+                val intent = Intent(context, TransferActionReceiver::class.java).apply {
+                    action = actionName
+                    putExtra(EXTRA_TRANSFER_ID, req.transferId)
+                }
+                return PendingIntent.getBroadcast(
+                    context,
+                    baseReqCode + offset,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
             }
 
-            val pAccept = PendingIntent.getBroadcast(context, 101, acceptIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            val pTrust = PendingIntent.getBroadcast(context, 102, trustIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            val pDecline = PendingIntent.getBroadcast(context, 103, declineIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-
-            val openIntent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            val pOpen = PendingIntent.getActivity(context, 100, openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-
-            val largeIcon = try {
-                BitmapFactory.decodeResource(context.resources, R.mipmap.ic_launcher)
-            } catch (_: Exception) { null }
-
-            val builder = NotificationCompat.Builder(context, CHANNEL_TRANSFER_ID)
-                .setContentTitle("Transfer Request")
+            val notification = NotificationCompat.Builder(context, CHANNEL_TRANSFER_ID)
+                .setContentTitle("Transfer request")
                 .setContentText("${req.senderName} wants to send ${req.fileName} (${req.formattedSize})")
                 .setSmallIcon(R.drawable.ic_snowdrop_notification)
-                .setContentIntent(pOpen)
+                .setLargeIcon(decodeLargeIcon(context))
+                .setContentIntent(pendingMainIntent(context, baseReqCode))
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setAutoCancel(true)
-                .addAction(0, "Accept", pAccept)
-                .addAction(0, "Always Trust", pTrust)
-                .addAction(0, "Decline", pDecline)
+                .addAction(0, "Accept", actionIntent(ACTION_APPROVAL_ACCEPT, 1))
+                .addAction(0, "Always Trust", actionIntent(ACTION_APPROVAL_TRUST, 2))
+                .addAction(0, "Decline", actionIntent(ACTION_APPROVAL_DECLINE, 3))
+                .build()
 
-            if (largeIcon != null) {
-                builder.setLargeIcon(largeIcon)
+            nm.notify(approvalNotificationId(req.transferId), notification)
+        }
+
+        fun cancelApprovalNotification(context: Context, transferId: String) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(approvalNotificationId(transferId))
+        }
+
+        fun showReceivedNotification(context: Context, fileName: String, contentUri: String) {
+            if (!canPostNotifications(context)) return
+            createNotificationChannels(context)
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+            val uri = Uri.parse(contentUri)
+            val mimeType = context.contentResolver.getType(uri) ?: "*/*"
+            val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
             }
+            val reqCode = 50_000 + (contentUri.hashCode() and 0x3FFF)
+            val pendingView = PendingIntent.getActivity(
+                context,
+                reqCode,
+                viewIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
 
-            val notification = builder.build()
+            val notification = NotificationCompat.Builder(context, CHANNEL_RECEIVED_ID)
+                .setSmallIcon(R.drawable.ic_snowdrop_notification)
+                .setLargeIcon(decodeLargeIcon(context))
+                .setContentTitle("File received")
+                .setContentText(fileName)
+                .setContentIntent(pendingView)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .build()
 
-            nm.notify(NOTIFICATION_APPROVAL_ID, notification)
+            nm.notify(receivedNotificationId(contentUri), notification)
         }
 
         fun start(context: Context) {
@@ -337,13 +352,6 @@ class TransferService : Service() {
             } else {
                 context.startService(intent)
             }
-        }
-
-        fun stop(context: Context) {
-            val intent = Intent(context, TransferService::class.java).apply {
-                action = ACTION_STOP
-            }
-            context.startService(intent)
         }
     }
 }
